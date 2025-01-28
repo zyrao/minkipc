@@ -17,7 +17,7 @@ git clone https://github.com/quic/minkipc.git
 cd minkipc
 mkdir build
 cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=CMakeToolchain.txt && cmake --build . --target install --config Release
+cmake .. -DCMAKE_TOOLCHAIN_FILE=CMakeToolchain.txt -DBUILD_UNITTEST=ON && cmake --build . --target install --config Release
 ```
 In order to build this package, you require QCBOR and QCOMTEE. These are not available using the standard Ubuntu repository. If you do not have them installed on your machine, you can fetch, build and install them from below mentioned locations:
 
@@ -26,6 +26,9 @@ In order to build this package, you require QCBOR and QCOMTEE. These are not ava
 2. QCOMTEE [repository](https://github.com/quic/quic-teec). Use `-DQCOMTEE_DIR_HINT=/path/to/installed/dir` to specify the QCOMTEE dependency.
 
 You can optionally specify the path for installation of the `minkipc` package, via `-DCMAKE_INSTALL_PREFIX:PATH=/path/to/minkipc/install`.
+
+## Tests
+List of available tests are [here](tests/README.md)
 
 ## Contributions
 
