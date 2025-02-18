@@ -7,6 +7,17 @@
 #include <object.h>
 #include <stdio.h>
 
+enum {
+	attr_uid = 1,
+	attr_pkg_flags,
+	attr_pkg_name,
+	attr_pkg_cert,
+	attr_permissions,
+	attr_system_time,
+};
+
+#define CREDENTIALS_BUF_SIZE_INC 4096
+
 enum test_types {
   CALLBACKOBJ,
   PRINT_TZ_DIAGNOSTICS,

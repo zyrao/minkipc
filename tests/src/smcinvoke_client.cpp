@@ -6,6 +6,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include <cstring>
 #include <string>
@@ -14,6 +15,7 @@
 
 #include "CAppLoader.h"
 #include "CDiagnostics.h"
+#include "CIO.h"
 #include "CTestCallable_open.h"
 #include "CTestCallable_priv.h"
 #include "IAppController.h"
@@ -25,6 +27,7 @@
 #include "MinkCom.h"
 #include "tzecotestapp_uids.h"
 #include "tzt.h"
+#include <qcbor/qcbor.h>
 
 static void usage(void)
 {
@@ -39,6 +42,60 @@ static void usage(void)
 	       "  -d  Run the TZ diagnostics test that prints basic info on TZ heaps\n"
 	       "      e.g. smcinvoke_vendor_client -d <no_of_iterations>\n"
 	       "  -h, Print this help message and exit\n\n\n");
+}
+
+static int64_t get_time_in_ms(void)
+{
+	struct timeval tv;
+
+	gettimeofday(&tv, NULL);
+
+	return (int64_t)(tv.tv_sec * 1000) + (int64_t)(tv.tv_usec / 1000);
+}
+
+static int realloc_useful_buf(UsefulBuf *buf)
+{
+	void *ptr;
+
+	ptr = realloc(buf->ptr, buf->len + CREDENTIALS_BUF_SIZE_INC);
+	if (!ptr)
+		return -1;
+
+	buf->ptr = ptr;
+	buf->len += CREDENTIALS_BUF_SIZE_INC;
+	memset(buf->ptr, 0, buf->len);
+
+	return 0;
+}
+
+/* Get credentials. */
+static void* get_self_creds(size_t *buf_len)
+{
+	QCBOREncodeContext e_ctx;
+        void *credential_buf = nullptr;
+	UsefulBufC enc;
+	UsefulBuf creds_useful_buf = { NULL, 0 };
+
+	do {
+		if (realloc_useful_buf(&creds_useful_buf)) {
+			free(creds_useful_buf.ptr);
+			return nullptr;
+		}
+
+		/* Use UID and system time to create a CBOR buffer. */
+		QCBOREncode_Init(&e_ctx, creds_useful_buf);
+		QCBOREncode_OpenMap(&e_ctx);
+		QCBOREncode_AddInt64ToMapN(&e_ctx, attr_uid, getuid());
+		QCBOREncode_AddInt64ToMapN(&e_ctx, attr_system_time,
+					   get_time_in_ms());
+		QCBOREncode_CloseMap(&e_ctx);
+	} while (QCBOREncode_Finish(&e_ctx, &enc) ==
+		 QCBOR_ERR_BUFFER_TOO_SMALL);
+
+	credential_buf = (void *)enc.ptr;
+	*buf_len = enc.len;
+
+	return credential_buf;
 }
 
 static void test_smcinvoke_cback_basic(Object appObj, Object clientEnv)
@@ -363,20 +420,31 @@ static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 static int run_tz_diagnostics_test(int argc, char *argv[])
 {
 	Object rootEnv = Object_NULL;
+	Object credentials = Object_NULL;
 	Object clientEnv = Object_NULL;
 	Object appObject = Object_NULL;
 	IDiagnostics_HeapInfo heapInfo;
+
+	size_t len = 0;
+	void* creds = NULL;
 
 	if (argc < 2) {
 		usage();
 		return -1;
 	}
 
+	creds = get_self_creds(&len);
+	if (!creds) {
+		return -1;
+	}
+
+	CIO_open(creds, len, &credentials);
+
 	int iterations = atoi(argv[2]);
 	memset((void *)&heapInfo, 0, sizeof(IDiagnostics_HeapInfo));
 
 	TEST_OK(MinkCom_getRootEnvObject(&rootEnv));
-	TEST_OK(MinkCom_getClientEnvObject(rootEnv, &clientEnv));
+	TEST_OK(MinkCom_getClientEnvObjectWithCreds(rootEnv, credentials, &clientEnv));
 	TEST_OK(IClientEnv_open(clientEnv, CDiagnostics_UID, &appObject));
 
 	for (int i = 0; i < iterations; i++) {
@@ -399,6 +467,7 @@ static int run_tz_diagnostics_test(int argc, char *argv[])
 
 	Object_ASSIGN_NULL(appObject);
 	Object_ASSIGN_NULL(clientEnv);
+	Object_ASSIGN_NULL(credentials);
 	Object_ASSIGN_NULL(rootEnv);
 	return 0;
 }
@@ -425,7 +494,7 @@ static unsigned int parse_command(int argc, char *const argv[])
 	unsigned int ret = 0;
 
 	while ((command = getopt_long(argc, argv, "cdh", testopts, NULL)) !=
-	       -1) {
+		-1) {
 		printf("command is: %d\n", command);
 		switch (command) {
 		case 'c':

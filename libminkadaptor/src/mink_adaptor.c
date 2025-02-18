@@ -499,9 +499,8 @@ int MinkCom_getClientEnvObject(Object rootObj, Object *clientEnvObj)
 	qcomtee_result_t result;
 
 	if (qcomtee_object_credentials_init(root, &creds_object)) {
-		ret = Object_ERROR;
 		MSGE("Failed qcomtee_object_credentials_init\n");
-		goto err_creds_init;
+		return Object_ERROR;
 	}
 
 	params[0].attr = QCOMTEE_OBJREF_INPUT;
@@ -516,16 +515,64 @@ int MinkCom_getClientEnvObject(Object rootObj, Object *clientEnvObj)
 	}
 
 	if (result) {
+		MSGE("Failed qcomtee_object_invoke. result = 0x%x\n", result);
 		ret = result;
-		MSGE("Failed qcomtee_object_invoke\n");
-		goto err_object_invoke;
+		goto err_result;
 	}
 
 	*clientEnvObj = mink_obj_from_qcomtee_obj(params[1].object);
 
+err_result:
+	/* qcomtee_object_invoke was successful; QTEE releases creds_object. */
+
+	return ret;
+
 err_object_invoke:
 	qcomtee_object_refs_dec(creds_object);
 
-err_creds_init:
+	return ret;
+}
+
+int MinkCom_getClientEnvObjectWithCreds(Object rootObj, Object creds,
+					Object *obj)
+{
+	int ret = Object_OK;
+
+	struct qcomtee_object *root = (struct qcomtee_object *)rootObj.context;
+	struct qcomtee_object *creds_object;
+	struct qcomtee_param params[2];
+	qcomtee_result_t result;
+
+	ret = qcomtee_obj_from_mink_obj(root, creds, &creds_object);
+	if (ret)
+		return ret;
+
+	params[0].attr = QCOMTEE_OBJREF_INPUT;
+	params[0].object = creds_object;
+	params[1].attr = QCOMTEE_OBJREF_OUTPUT;
+
+	/* 5 is IClientEnv_OP_registerWithCredentials. */
+	if (qcomtee_object_invoke(root, 2, params, 2, &result)) {
+		ret = Object_ERROR;
+		MSGE("Failed qcomtee_object_invoke\n");
+		goto err_object_invoke;
+	}
+
+	if (result) {
+		MSGE("Failed qcomtee_object_invoke. result = 0x%x\n", result);
+		ret = result;
+		goto err_result;
+	}
+
+	*obj = mink_obj_from_qcomtee_obj(params[1].object);
+
+err_result:
+	/* qcomtee_object_invoke was successful; QTEE releases creds_object. */
+
+	return ret;
+
+err_object_invoke:
+	qcomtee_object_refs_dec(creds_object);
+
 	return ret;
 }

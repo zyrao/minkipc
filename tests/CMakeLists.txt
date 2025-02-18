@@ -22,6 +22,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(SRC
 	src/smcinvoke_client.cpp
 	src/CTestCallable.cpp
+	src/CIO.c
 )
 
 # ''Built binary''.
