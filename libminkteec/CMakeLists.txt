@@ -3,6 +3,10 @@ project(libminkteec
 	LANGUAGES C
 )
 
+if (BUILD_UNITTEST)
+	add_subdirectory(tests/gp_test_client)
+endif()
+
 add_compile_options(
 	-Wstrict-prototypes -Wmissing-prototypes -Wbad-function-cast
 )
