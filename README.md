@@ -51,6 +51,12 @@ In order to build this package, you require QCBOR and QCOMTEE. These are not ava
 
 You can optionally specify the path for installation of the `minkipc` package, via `-DCMAKE_INSTALL_PREFIX:PATH=/path/to/minkipc/install`.
 
+The following CMake options are available for configuring this package:
+
+`-DBUILD_UNITTEST=ON` - Build Unit tests
+
+`-DBUILD_MINKTEEC=ON` - Build Mink TEEC library
+
 ## Tests
 List of available tests for each module are available in the module's README file.
 
@@ -61,4 +67,3 @@ Thanks for your interest in contributing to MinkIPC! Please read our [Contributi
 ## License
 
 **MinkIPC** Project is licensed under the [BSD-3-clause License](https://spdx.org/licenses/BSD-3-Clause.html). See [LICENSE.txt](LICENSE.txt) for the full license text.
-
