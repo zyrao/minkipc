@@ -16,10 +16,14 @@ static qcomtee_result_t
 qcomtee_callback_obj_dispatch(struct qcomtee_object *object, qcomtee_op_t op,
 			      struct qcomtee_param *params, int num);
 
+static void qcomtee_callback_obj_cleanup(struct qcomtee_object *object,
+					 int err);
+
 static void qcomtee_callback_obj_release(struct qcomtee_object *object);
 
 static struct qcomtee_object_ops ops = {
 	.dispatch = qcomtee_callback_obj_dispatch,
+	.error = qcomtee_callback_obj_cleanup,
 	.release = qcomtee_callback_obj_release,
 };
 
@@ -142,17 +146,30 @@ static void release_qcomtee_objs(struct qcomtee_param *params,
  */
 static int32_t object_args_from_tee_params_cb(struct qcomtee_param *params,
 					      uint32_t num_params,
-					      ObjectArg *args)
+					      ObjectArg *args,
+					      void **allocated_bo)
 {
-	for (uint32_t i = 0; i < num_params; i++) {
+	uint32_t bo = 0;
+	uint32_t i = 0;
+	void *ubuf_ptr = NULL;
+
+	for (i = 0; i < num_params; i++) {
 		switch (params[i].attr) {
 		case QCOMTEE_UBUF_INPUT:
 			args[i].b.ptr = params[i].ubuf.addr;
 			args[i].b.size = params[i].ubuf.size;
 			break;
 		case QCOMTEE_UBUF_OUTPUT:
-			args[i].b.ptr = params[i].ubuf.addr;
+			/* params[i].ubuf.addr is NULL for UBUF_OUTPUT */
+			ubuf_ptr = malloc(params[i].ubuf.size);
+			if (!ubuf_ptr)
+				goto out_failed;
+
+			args[i].b.ptr = ubuf_ptr;
 			args[i].b.size = params[i].ubuf.size;
+
+			/* Account for it, we'll free it later during cleanup */
+			allocated_bo[bo++] = args[i].b.ptr;
 			break;
 		case QCOMTEE_OBJREF_INPUT:
 			args[i].o = mink_obj_from_qcomtee_obj(params[i].object);
@@ -165,6 +182,14 @@ static int32_t object_args_from_tee_params_cb(struct qcomtee_param *params,
 	}
 
 	return Object_OK;
+
+out_failed:
+	for (i = 0; i < bo; i++) {
+		if (allocated_bo[i])
+			free(allocated_bo[i]);
+	}
+
+	return Object_ERROR;
 }
 
 /**
@@ -231,18 +256,47 @@ qcomtee_callback_obj_dispatch(struct qcomtee_object *object, qcomtee_op_t op,
 	ObjectArg objArgs[MAX_OBJ_ARG_COUNT] = { { { 0, 0 } } };
 	ObjectCounts counts = get_obj_counts(params, num);
 
-	object_args_from_tee_params_cb(params, num, objArgs);
+	ret = object_args_from_tee_params_cb(params, num, objArgs,
+					     qcomtee_cbo->allocated_bo);
+	if (ret)
+		return ret;
 
 	ret = Object_invoke(qcomtee_cbo->mink_obj, op, objArgs, counts);
 	if (!ret) {
 		ret = object_args_to_tee_params_cb(objArgs, counts, params,
 						   root);
-		if (ret)
+		if (ret) {
 			release_qcomtee_objs(params, num,
 					     QCOMTEE_OBJREF_OUTPUT);
+
+			/* If dispatch fails, QCOMTEE doesn't call cleanup */
+			qcomtee_callback_obj_cleanup(object, 0);
+		}
 	}
 
 	return ret;
+}
+
+/**
+ * @brief Clean up resources after sending the response for the dispatch
+ * request to QCOMTEE.
+ *
+ * Invoked by QCOMTEE post-response to allow the Mink Adaptor layer to
+ * release any resources allocated during the dispatch request.
+ *
+ * @param object The QCOMTEE callback object which was invoked.
+ * @param err Error (if any) encountered while sending the response to QCOMTEE.
+ */
+static void qcomtee_callback_obj_cleanup(struct qcomtee_object *object, int err)
+{
+	(void)err;
+	struct qcomtee_callback_obj *qcomtee_cbo = CALLBACKOBJ(object);
+	uint32_t i = 0;
+
+	for (i = 0; i < ObjectCounts_maxBO; i++) {
+		if (qcomtee_cbo->allocated_bo[i])
+			free(qcomtee_cbo->allocated_bo[i]);
+	}
 }
 
 /**
