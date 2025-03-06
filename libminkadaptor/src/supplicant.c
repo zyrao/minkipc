@@ -85,7 +85,11 @@ static void supplicant_kill_handler(int sig, siginfo_t *info, void *context)
  *         Returns -EINVAL if invalid arguments were provided.
  */
 
+#ifdef __GLIBC__
+static int tee_call(int fd, unsigned long op, ...)
+#else
 static int tee_call(int fd, int op, ...)
+#endif
 {
 	int ret = -1;
 	sigset_t mask;
@@ -97,7 +101,6 @@ static int tee_call(int fd, int op, ...)
 
 	switch (op) {
 	case TEE_IOC_SUPPL_RECV:
-
 		sigemptyset(&mask);
 		sigaddset(&mask, SIGUSR1);
 
@@ -109,16 +112,13 @@ static int tee_call(int fd, int op, ...)
 
 		set_errno(ret);
 		break;
-	case TEE_IOC_SUPPL_SEND:
-		ret = ioctl(fd, op, arg);
-		break;
+	/* TEE_IOC_OBJECT_INVOKE
+	 * TEE_IOC_SUPPL_SEND
+	 * TEE_IOC_SHM_ALLOC
+	 */
 	default:
-		ret = -EINVAL;
-		set_errno(ret);
+		ret = ioctl(fd, op, arg);
 	}
-
-	if (ret)
-		MSGE("tee_call: %s\n", strerror(errno));
 
 	return ret;
 }
@@ -135,8 +135,7 @@ static int tee_call(int fd, int op, ...)
 static void *supplicant_worker(void *arg)
 {
 	while (1) {
-		if (qcomtee_object_process_one((struct qcomtee_object *)arg,
-					       tee_call))
+		if (qcomtee_object_process_one(arg))
 			break;
 	}
 
@@ -170,7 +169,6 @@ static void supplicant_release(void *arg)
 		if (sup->pthreads[i].state)
 			pthread_join(sup->pthreads[i].thread, NULL);
 
-	MSGD("Supplicant released.\n");
 	free(sup);
 }
 
@@ -207,7 +205,8 @@ struct supplicant *supplicant_start(int pthreads_num)
 		return NULL;
 
 	/* Start a fresh namespace. */
-	sup->root = qcomtee_object_root_init(DEV_TEE, supplicant_release, sup);
+	sup->root = qcomtee_object_root_init(DEV_TEE, tee_call, supplicant_release,
+					     sup);
 	if (sup->root == QCOMTEE_OBJECT_NULL)
 		goto failed_out;
 
