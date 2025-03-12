@@ -12,6 +12,7 @@ typedef struct {
 	int32_t retValue;
 	int32_t retValueError;
 	Object oArg;
+	Object oOArg;
 	Object oOOArg;
 	Object oOOArg0;
 	Object oOOArg1;

@@ -45,6 +45,32 @@ int MinkCom_getClientEnvObject(Object root, Object *obj);
 */
 int MinkCom_getClientEnvObjectWithCreds(Object root, Object creds, Object *obj);
 
+/**
+ * @brief Get a Memory object representing physically contiguous memory shared
+ * with QTEE.
+ *
+ * @param root: The RootEnv object for initiating MINK-IPC based communication.
+ * @param size: Size of the memory represented by the Memory object.
+ * @param memObj: The Memory object requested by the client.
+ *
+ * @return Object_OK on success.
+ *         Object_ERROR_* on failure.
+*/
+int MinkCom_getMemoryObject(Object rootObj, size_t size, Object *memObj);
+
+/**
+ * @brief Get the virtual address and size of the memory represented by a
+ * Memory object.
+ *
+ * @param memObj: The Memory object for which information is requested.
+ * @param address: Virtual address of the memory represented by the Memory
+ *                 object.
+ * @param size: Actual size of the memory represented by the Memory object.
+ * @return Object_OK on success.
+ *         Object_ERROR_* on failure.
+*/
+int MinkCom_getMemoryObjectInfo(Object memObj, void **address, size_t *size);
+
 #ifdef __cplusplus
 }
 #endif

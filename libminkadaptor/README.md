@@ -27,9 +27,15 @@ A Root Environment Object is a type of Remote Object that allows invocation to t
 
 These objects are forwarded from the Linux environment to QTEE to allow domains within QTEE to hold remote references to them. Entities in the QTEE domain (e.g. Trusted Applications) can utilize these remote references to invoke object functionality implemented by entities in the Linux domain (e.g. Linux user-space Applications).
 
+#### Memory Objects
+
+A Memory Object represents contiguous page-aligned memory shared with QTEE. Clients can write into this memory and share the Memory Object with QTEE via `Object_invoke`.
+
 ## Tests
 
 You can run the `smcinvoke_client` binary with the following commands:
 
 - _QTEE Diagnostics_ `smcinvoke_client -d <iterations to run>`
 - _Callback Objects_ `smcinvoke_client -c /path/to/tzecotestapp.mbn <iterations to run>`
+- _Memory Objects_   `smcinvoke_client -m /path/to/tzecotestapp.mbn <iterations to run>`
+

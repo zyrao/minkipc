@@ -7,6 +7,6 @@
 #include <stdint.h>
 #include "object.h"
 
-int32_t CTestCallable_open(Object remoteObj, Object* obj);
+int32_t CTestCallable_open(Object remoteObj, Object root, Object* obj);
 
 #endif // __CTESTCALLABLE_OPEN_H

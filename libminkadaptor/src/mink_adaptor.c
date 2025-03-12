@@ -43,12 +43,10 @@ qcomtee_obj_from_mink_obj(struct qcomtee_object *root_object, Object obj,
 	if (Object_isNull(obj)) {
 		*object = QCOMTEE_OBJECT_NULL;
 		return Object_OK;
-	}
-	else if (obj.invoke == invoke_over_tee) {
+	} else if (obj.invoke == invoke_over_tee) {
 		*object = (struct qcomtee_object *)obj.context;
 		return Object_OK;
-	}
-	else {
+	} else {
 		struct qcomtee_callback_obj *qcomtee_cbo;
 
 		qcomtee_cbo = calloc(1, sizeof(*qcomtee_cbo));
@@ -77,14 +75,15 @@ qcomtee_obj_from_mink_obj(struct qcomtee_object *root_object, Object obj,
  */
 static Object mink_obj_from_qcomtee_obj(struct qcomtee_object *qcomtee_obj)
 {
-	if (qcomtee_obj == QCOMTEE_OBJECT_NULL)
+	if (qcomtee_obj == QCOMTEE_OBJECT_NULL) {
 		return Object_NULL;
-	else if (qcomtee_object_typeof(qcomtee_obj) == QCOMTEE_OBJECT_TYPE_CB) {
+	} else if (qcomtee_object_typeof(qcomtee_obj) == QCOMTEE_OBJECT_TYPE_CB) {
 		struct qcomtee_callback_obj *qcomtee_cbo =
 			CALLBACKOBJ(qcomtee_obj);
 		return qcomtee_cbo->mink_obj;
-	} else
+	} else { /* Remote and Memory Objects */
 		return (Object){ invoke_over_tee, qcomtee_obj };
+	}
 }
 
 /**
@@ -574,5 +573,56 @@ err_result:
 err_object_invoke:
 	qcomtee_object_refs_dec(creds_object);
 
+	return ret;
+}
+
+int MinkCom_getMemoryObject(Object rootObj, size_t size, Object *memObj)
+{
+	int ret = Object_OK;
+
+	struct qcomtee_object *memory_object = NULL;
+	struct qcomtee_object *root = (struct qcomtee_object *)rootObj.context;
+	if (!root) {
+		ret = Object_ERROR;
+		goto err;
+	}
+
+	if(qcomtee_memory_object_alloc(size, root, &memory_object)) {
+		ret = Object_ERROR;
+		goto err;
+	}
+
+	*memObj = mink_obj_from_qcomtee_obj(memory_object);
+err:
+	return ret;
+}
+
+int MinkCom_getMemoryObjectInfo(Object memObj, void **address, size_t *size)
+{
+	int ret = Object_OK;
+
+	struct qcomtee_object *memory_object = NULL;
+
+	memory_object = (struct qcomtee_object *)memObj.context;
+	if (!memory_object) {
+		ret = Object_ERROR;
+		goto err;
+	}
+
+	if (qcomtee_object_typeof(memory_object) !=
+					QCOMTEE_OBJECT_TYPE_MEMORY) {
+		ret = Object_ERROR;
+		goto err;
+	}
+
+	*address = qcomtee_memory_object_addr(memory_object);
+	*size = qcomtee_memory_object_size(memory_object);
+
+	if (!*address || !*size) {
+		ret = Object_ERROR;
+		goto err;
+	}
+
+err:
 	return ret;
 }

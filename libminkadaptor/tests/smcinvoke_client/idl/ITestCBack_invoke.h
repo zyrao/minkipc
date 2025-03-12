@@ -40,11 +40,123 @@
         size_t arg_len = a[0].b.size / 1; \
         return prefix##callWithBuffer(me, arg_ptr, arg_len); \
       } \
+      case ITestCallable_OP_callWithBufferOut: { \
+        if (k != ObjectCounts_pack(0, 1, 0, 0)) { \
+          break; \
+        } \
+        void *arg1_ptr = (void*) a[0].b.ptr; \
+        size_t arg1_len = a[0].b.size / 1; \
+        int32_t r = prefix##callWithBufferOut(me, arg1_ptr, arg1_len, &arg1_len); \
+        a[0].b.size = arg1_len * 1; \
+        return r; \
+      } \
       case ITestCallable_OP_callWithObject: { \
         if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
           break; \
         } \
         return prefix##callWithObject(me, a[0].o); \
+      } \
+      case ITestCallable_OP_callGetObject: { \
+        if (k != ObjectCounts_pack(0, 0, 0, 1)) { \
+          break; \
+        } \
+        return prefix##callGetObject(me, &a[0].o); \
+      } \
+      case ITestCallable_OP_callGetThreeObjects: { \
+        if (k != ObjectCounts_pack(0, 0, 0, 3)) { \
+          break; \
+        } \
+        return prefix##callGetThreeObjects(me, &a[0].o, &a[1].o, &a[2].o); \
+      } \
+      case ITestCallable_OP_callAddInt: { \
+        if (k != ObjectCounts_pack(1, 1, 0, 0) || \
+          a[0].b.size != 8 || \
+          a[1].b.size != 4) { \
+          break; \
+        } \
+        typedef struct { \
+          uint32_t m_inVal1; \
+          uint32_t m_inVal2; \
+        } addtype; \
+  addtype *i = (addtype *)a[0].b.ptr; \
+        uint32_t *outVal_ptr = (uint32_t*) a[1].b.ptr; \
+        return prefix##callAddInt(me, i->m_inVal1, i->m_inVal2, outVal_ptr); \
+      } \
+      case ITestCallable_OP_returnError: { \
+        if (k != ObjectCounts_pack(0, 0, 0, 0)) { \
+          break; \
+        } \
+        return prefix##returnError(me); \
+      } \
+      case ITestCallable_OP_callCopyBuffer: { \
+        if (k != ObjectCounts_pack(1, 1, 0, 0)) { \
+          break; \
+        } \
+        const void *inBuf_ptr = (const void*) a[0].b.ptr; \
+        size_t inBuf_len = a[0].b.size / 1; \
+        void *outBuf_ptr = (void*) a[1].b.ptr; \
+        size_t outBuf_len = a[1].b.size / 1; \
+        int32_t r = prefix##callCopyBuffer(me, inBuf_ptr, inBuf_len, outBuf_ptr, outBuf_len, &outBuf_len); \
+        a[1].b.size = outBuf_len * 1; \
+        return r; \
+      } \
+      case ITestCallable_OP_callFuncWithBuffer: { \
+        if (k != ObjectCounts_pack(1, 0, 0, 0)) { \
+          break; \
+        } \
+        const void *arg_ptr = (const void*) a[0].b.ptr; \
+        size_t arg_len = a[0].b.size / 1; \
+        return prefix##callFuncWithBuffer(me, arg_ptr, arg_len); \
+      } \
+      case ITestCallable_OP_callWithDelay: { \
+        if (k != ObjectCounts_pack(0, 1, 0, 0) || \
+          a[0].b.size != 4) { \
+          break; \
+        } \
+        int32_t *outVal_ptr = (int32_t*) a[0].b.ptr; \
+        return prefix##callWithDelay(me, outVal_ptr); \
+      } \
+      case ITestCallable_OP_callGetMemObject: { \
+        if (k != ObjectCounts_pack(0, 0, 0, 1)) { \
+          break; \
+        } \
+        return prefix##callGetMemObject(me, &a[0].o); \
+      } \
+      case ITestCallable_OP_callGetMemObjectWithBufferIn: { \
+        if (k != ObjectCounts_pack(1, 0, 0, 1)) { \
+          break; \
+        } \
+        const void *arg1_ptr = (const void*)a[0].b.ptr; \
+        size_t arg1_len = a[0].b.size / 1; \
+        return prefix##callGetMemObjectWithBufferIn(me, &a[1].o, arg1_ptr, arg1_len); \
+      } \
+      case ITestCallable_OP_callGetMemObjectWithBufferOut: { \
+        if (k != ObjectCounts_pack(0, 1, 0, 1)) { \
+          break; \
+        } \
+        void *arg1_ptr = (void*)a[0].b.ptr; \
+        size_t arg1_len = a[0].b.size / 1; \
+        int32_t r = prefix##callGetMemObjectWithBufferOut(me, &a[1].o, arg1_ptr, arg1_len, &arg1_len); \
+        a[0].b.size = arg1_len * 1; \
+        return r; \
+      } \
+      case ITestCallable_OP_callGetMemObjectWithBufferInAndOut: { \
+        if (k != ObjectCounts_pack(1, 1, 0, 1)) { \
+          break; \
+        } \
+        const void *arg1_ptr = (const void*)a[0].b.ptr; \
+        size_t arg1_len = a[0].b.size / 1; \
+        void *arg2_ptr = (void*)a[1].b.ptr; \
+        size_t arg2_len = a[1].b.size / 1; \
+        int32_t r = prefix##callGetMemObjectWithBufferInAndOut(me, &a[2].o, arg1_ptr, arg1_len, arg2_ptr, arg2_len, &arg2_len); \
+        a[1].b.size = arg2_len * 1; \
+        return r; \
+      } \
+      case ITestCallable_OP_callGetTwoMemObjects: { \
+        if (k != ObjectCounts_pack(0, 0, 0, 2)) { \
+          break; \
+        } \
+        return prefix##callGetTwoMemObjects(me, &a[0].o, &a[1].o); \
       } \
     } \
     return Object_ERROR_INVALID; \
@@ -93,11 +205,110 @@
         size_t arg_len = a[0].b.size / 1; \
         return prefix##callWithBuffer(me, arg_ptr, arg_len, a[1].o); \
       } \
+      case ITestCBack_OP_callWithBufferOut: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callWithBufferOut(me, a[0].o); \
+      } \
       case ITestCBack_OP_callWithObject: { \
         if (k != ObjectCounts_pack(0, 0, 2, 0)) { \
           break; \
         } \
         return prefix##callWithObject(me, a[0].o, a[1].o); \
+      } \
+      case ITestCBack_OP_callGetObject: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callGetObject(me, a[0].o); \
+      } \
+      case ITestCBack_OP_callGetThreeObjects: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callGetThreeObjects(me, a[0].o); \
+      } \
+      case ITestCBack_OP_callAddInt: { \
+        if (k != ObjectCounts_pack(1, 1, 1, 0) || \
+          a[0].b.size != 8 || \
+          a[1].b.size != 4) { \
+          break; \
+        } \
+        const struct { \
+          uint32_t m_inVal1; \
+          uint32_t m_inVal2; \
+        } *i = a[0].b.ptr; \
+        uint32_t *outVal_ptr = (uint32_t*) a[1].b.ptr; \
+        return prefix##callAddInt(me, a[2].o, i->m_inVal1, i->m_inVal2, outVal_ptr); \
+      } \
+      case ITestCBack_OP_callReturnError: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callReturnError(me, a[0].o); \
+      } \
+      case ITestCBack_OP_callCopyBuffer: { \
+        if (k != ObjectCounts_pack(1, 1, 0, 0)) { \
+          break; \
+        } \
+        const void *inBuf_ptr = (const void*) a[0].b.ptr; \
+        size_t inBuf_len = a[0].b.size / 1; \
+        void *outBuf_ptr = (void*) a[1].b.ptr; \
+        size_t outBuf_len = a[1].b.size / 1; \
+        int32_t r = prefix##callCopyBuffer(me, inBuf_ptr, inBuf_len, outBuf_ptr, outBuf_len, &outBuf_len); \
+        a[1].b.size = outBuf_len * 1; \
+        return r; \
+      } \
+      case ITestCBack_OP_callFuncWithBuffer: { \
+        if (k != ObjectCounts_pack(1, 0, 1, 0)) { \
+          break; \
+        } \
+        const void *arg_ptr = (const void*) a[0].b.ptr; \
+        size_t arg_len = a[0].b.size / 1; \
+        return prefix##callFuncWithBuffer(me, arg_ptr, arg_len, a[1].o); \
+      } \
+      case ITestCBack_OP_callWithDelay: { \
+        if (k != ObjectCounts_pack(0, 1, 1, 0) || \
+          a[0].b.size != 4) { \
+          break; \
+        } \
+        int32_t *outVal_ptr = (int32_t*) a[0].b.ptr; \
+        return prefix##callWithDelay(me, a[1].o, outVal_ptr); \
+      } \
+      case ITestCBack_OP_callGetMemObject: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callGetMemObject(me, a[0].o); \
+      } \
+      case ITestCBack_OP_callGetMemObjectWithBufferIn: { \
+        if (k != ObjectCounts_pack(1, 0, 1, 0)) { \
+          break; \
+        } \
+        const void *arg_ptr = (const void*)a[0].b.ptr; \
+        size_t arg_len = a[0].b.size / 1; \
+        return prefix##callGetMemObjectWithBufferIn(me, arg_ptr, arg_len, a[1].o); \
+      } \
+      case ITestCBack_OP_callGetMemObjectWithBufferOut: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callGetMemObjectWithBufferOut(me, a[0].o); \
+      } \
+      case ITestCBack_OP_callGetMemObjectWithBufferInAndOut: { \
+        if (k != ObjectCounts_pack(1, 0, 1, 0)) { \
+          break; \
+        } \
+        const void *arg_ptr = (const void*)a[0].b.ptr; \
+        size_t arg_len = a[0].b.size / 1; \
+        return prefix##callGetMemObjectWithBufferInAndOut(me, arg_ptr, arg_len, a[1].o); \
+      } \
+      case ITestCBack_OP_callGetTwoMemObjects: { \
+        if (k != ObjectCounts_pack(0, 0, 1, 0)) { \
+          break; \
+        } \
+        return prefix##callGetTwoMemObjects(me, a[0].o); \
       } \
     } \
     return Object_ERROR_INVALID; \

@@ -24,10 +24,13 @@
 #include "IDiagnostics.h"
 #include "IOpener.h"
 #include "ITestCBack.h"
+#include "ITestMemManager.h"
 #include "MinkCom.h"
 #include "tzecotestapp_uids.h"
 #include "tzt.h"
 #include <qcbor/qcbor.h>
+
+int32_t create_and_assign_mem_obj(Object, Object *);
 
 static void usage(void)
 {
@@ -37,10 +40,12 @@ static void usage(void)
 	       "parameter(s).\n"
 	       "\n\n"
 	       "OPTION can be:\n"
-	       "  -c, Run tests to check callback objects in smcinvoke\n"
-	       "      e.g. smcinvoke_vendor_client -c /data 1\n\n"
+	       "  -c, Run tests for checking callback object support via MinkIPC\n"
+	       "      e.g. smcinvoke_client -c /data <no_of_iterations>\n"
 	       "  -d  Run the TZ diagnostics test that prints basic info on TZ heaps\n"
-	       "      e.g. smcinvoke_vendor_client -d <no_of_iterations>\n"
+	       "      e.g. smcinvoke_client -d <no_of_iterations>\n"
+	       "  -m  Run tests for checking memory object support via MinkIPC\n"
+	       "      e.g. smcinvoke_client -m /data <no_of_iterations>\n"
 	       "  -h, Print this help message and exit\n\n\n");
 }
 
@@ -72,7 +77,7 @@ static int realloc_useful_buf(UsefulBuf *buf)
 static void* get_self_creds(size_t *buf_len)
 {
 	QCBOREncodeContext e_ctx;
-        void *credential_buf = nullptr;
+	void *credential_buf = nullptr;
 	UsefulBufC enc;
 	UsefulBuf creds_useful_buf = { NULL, 0 };
 
@@ -98,11 +103,122 @@ static void* get_self_creds(size_t *buf_len)
 	return credential_buf;
 }
 
-static void test_smcinvoke_cback_basic(Object appObj, Object clientEnv)
+int32_t create_and_assign_mem_obj(Object root, Object *argptr)
+{
+	int32_t result = Object_OK;
+	void* alignedPtr = NULL;
+	Object mo = Object_NULL;
+	struct smcinvoke_priv_handle handle = { NULL, 0 };
+
+	// Create a memory object of 32 KB
+	result = MinkCom_getMemoryObject(root, 8*SIZE_4KB, &mo);
+	if (result) {
+		LOGE_PRINT("MinkCom_getMemoryObject failed: 0x%x\n", result);
+		return result;
+	}
+
+	result = MinkCom_getMemoryObjectInfo(mo, &handle.addr, &handle.size);
+	if (result) {
+		LOGE_PRINT("MinkCom_getMemoryObjectInfo failed: 0x%x\n", result);
+		goto err;
+	}
+
+	// Write into it
+	alignedPtr = handle.addr;
+	*(uint64_t*)alignedPtr = ITestMemManager_TEST_PATTERN1;
+
+	Object_INIT(*argptr, mo);
+err:
+	Object_ASSIGN_NULL(mo);
+	return result;
+}
+
+static void test_smcinvoke_memobj_basic(Object rootEnv, Object appObj)
+{
+	Object mmTestObj = Object_NULL;
+	void* alignedPtr = NULL;
+	void* alignedPtr1 = NULL;
+	Object memObj = Object_NULL;
+	Object memObj1 = Object_NULL;
+	struct smcinvoke_priv_handle handle = { NULL, 0 };
+	struct smcinvoke_priv_handle handle1 = { NULL, 0 };
+
+	// Get the memmgr test object
+	TEST_OK(IOpener_open(appObj, CTzEcoTestApp_TestMemManager_UID, &mmTestObj));
+
+	// Get a memory object
+	TEST_OK(MinkCom_getMemoryObject(rootEnv, SIZE_4KB, &memObj));
+	TEST_FALSE(Object_isNull(memObj));
+
+	// Get address and size of backing memory in handle
+	TEST_OK(MinkCom_getMemoryObjectInfo(memObj, &handle.addr, &handle.size));
+	LOGD_PRINT("addr = %p, size = 0x%lx\n", handle.addr, handle.size);
+
+	// Write to the memory
+	alignedPtr = handle.addr;
+	*(uint64_t*)alignedPtr = ITestMemManager_TEST_PATTERN1;
+
+	LOGD_PRINT("send buf %lx\n", *(uint64_t*)alignedPtr);
+
+	// Send memory object to TA
+	TEST_OK(ITestMemManager_access(mmTestObj, memObj));
+
+	// Did the TA modify it?
+	LOGD_PRINT("return buf %lx\n", *(uint64_t*)alignedPtr);
+
+	TEST_TRUE(*(uint64_t*)alignedPtr == ITestMemManager_TEST_PATTERN2);
+
+	// Send the same memory object again (mapping information is not sent again)
+	*(uint64_t*)alignedPtr = ITestMemManager_TEST_PATTERN1;
+	LOGD_PRINT("Mem obj sent 2nd time: send buf %lx\n", *(uint64_t*)alignedPtr);
+
+	TEST_OK(ITestMemManager_access(mmTestObj, memObj));
+	LOGD_PRINT("Mem obj sent 2nd time: return buf %lx\n",
+		   *(uint64_t*)alignedPtr);
+	TEST_TRUE(*(uint64_t*)alignedPtr == ITestMemManager_TEST_PATTERN2);
+
+	// Get another memory object
+	TEST_OK(MinkCom_getMemoryObject(rootEnv, SIZE_4KB, &memObj1));
+	TEST_FALSE(Object_isNull(memObj1));
+
+	TEST_OK(MinkCom_getMemoryObjectInfo(memObj1, &handle1.addr, &handle1.size));
+	LOGD_PRINT("addr = %p, size = 0x%lx\n", handle1.addr, handle1.size);
+
+	// Send two memory objects and test TA access to both
+	*(uint64_t*)alignedPtr = ITestMemManager_TEST_PATTERN1;
+	LOGD_PRINT("1st mem obj: send buf %lx\n", *(uint64_t*)alignedPtr);
+
+	alignedPtr1 = handle1.addr;
+	*(uint64_t*)alignedPtr1 = ITestMemManager_TEST_PATTERN1;
+	LOGD_PRINT("2nd mem obj: send buf %lx\n", *(uint64_t*)alignedPtr1);
+
+	TEST_OK(ITestMemManager_accessTwoMemObjects(mmTestObj, memObj, memObj1));
+
+	LOGD_PRINT("1st mem obj: return buf %lx\n", *(uint64_t*)alignedPtr);
+	LOGD_PRINT("2nd mem obj: return buf %lx\n", *(uint64_t*)alignedPtr1);
+	TEST_TRUE(*(uint64_t*)alignedPtr == ITestMemManager_TEST_PATTERN2);
+	TEST_TRUE(*(uint64_t*)alignedPtr1 == ITestMemManager_TEST_PATTERN2);
+
+	Object_ASSIGN_NULL(memObj1);
+	Object_ASSIGN_NULL(memObj);
+
+	// Send a memory object and release it immediately (without mapping)
+	TEST_OK(MinkCom_getMemoryObject(rootEnv, SIZE_4KB, &memObj));
+	TEST_FALSE(Object_isNull(memObj));
+
+	TEST_OK(ITestMemManager_releaseImmediately(mmTestObj, memObj));
+
+	// Free the objects
+	Object_ASSIGN_NULL(memObj);
+	Object_ASSIGN_NULL(mmTestObj);
+}
+
+static void test_smcinvoke_cback_basic(Object appObj, Object root, Object clientEnv)
 {
 	Object oTCB = Object_NULL;
 	Object oCB = Object_NULL;
 	Object oCB1 = Object_NULL;
+	Object mem_oCB = Object_NULL;
 	TestCallable *cb = NULL;
 	uint8_t bi[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 	int ret = Object_OK;
@@ -111,7 +227,7 @@ static void test_smcinvoke_cback_basic(Object appObj, Object clientEnv)
 	SILENT_OK(IOpener_open(appObj, CTzEcoTestApp_TestCBack_UID, &oTCB));
 
 	// Get a local callable object
-	SILENT_OK(CTestCallable_open(clientEnv, &oCB));
+	SILENT_OK(CTestCallable_open(clientEnv, root, &oCB));
 	cb = (TestCallable *)oCB.context;
 
 	// Set the expected return and check preconditions
@@ -156,7 +272,7 @@ static void test_smcinvoke_cback_basic(Object appObj, Object clientEnv)
 	TEST_TRUE(cb->op == ITestCallable_OP_callWithBuffer);
 
 	// With another callable object as argument
-	SILENT_OK(CTestCallable_open(clientEnv, &oCB1));
+	SILENT_OK(CTestCallable_open(clientEnv, root, &oCB1));
 	cb->counter = 0;
 	Object_ASSIGN(cb->oArg, oCB1);
 	ret = ITestCBack_callWithObject(oTCB, oCB1, oCB);
@@ -227,21 +343,91 @@ static void test_smcinvoke_cback_basic(Object appObj, Object clientEnv)
 	LOGD_PRINT("%s:%d: ret=0x%x counter=%zu op=%d refs=%d\n", __FUNCTION__,
 		   __LINE__, ret, cb->counter, cb->op, cb->refs);
 
+	/* Test use case that returns memory object in callback response and
+	 * also checks for any memory leak caused by this mem object.
+	 */
+	SILENT_OK(CTestCallable_open(clientEnv, root, &mem_oCB));
+	cb = (TestCallable*)mem_oCB.context;
+	SILENT_TRUE(cb->op == -1);
+	SILENT_TRUE(cb->counter == 0);
+	SILENT_TRUE(cb->refs == 1);
+	cb->retValue = Object_OK;
+	// Some unique error code which doesn't overlap with Mink error codes
+	cb->retValueError = 0xFAFAFAFA;
+
+	ret = ITestCBack_callGetMemObject(oTCB, mem_oCB);
+	LOGD_PRINT("%s:%d: ret=%d counter=%zu op=%d refs=%d\n", __FUNCTION__,
+		   __LINE__, ret, cb->counter, cb->op, cb->refs);
+	TEST_OK(ret);
+	TEST_TRUE(ret == cb->retValue);
+	TEST_TRUE(cb->counter == 1);
+	TEST_TRUE(cb->op == ITestCallable_OP_callGetMemObject);
+
+	/* After returning from QTEE, the memory object should be released */
+
+	/* Test use case for returning memory objects in a callback response
+	 * with different paramters
+	 */
+	cb->op = -1;
+	cb->counter = 0;
+	cb->bArg_ptr = bi;
+	cb->bArg_len = sizeof(bi);
+
+	ret = ITestCBack_callGetMemObjectWithBufferIn(oTCB, bi, sizeof(bi), mem_oCB);
+	LOGD_PRINT("%s:%d: ret=%d counter=%zu op=%d refs=%d\n", __FUNCTION__,
+		   __LINE__, ret, cb->counter, cb->op, cb->refs);
+	TEST_OK(ret);
+	TEST_TRUE(ret == cb->retValue);
+	TEST_TRUE(cb->counter == 1);
+	TEST_TRUE(cb->op == ITestCallable_OP_callGetMemObjectWithBufferIn);
+
+	/* BO */
+	cb->op = -1;
+	cb->counter = 0;
+	cb->bArg_ptr = NULL;
+	cb->bArg_len = 0;
+
+	ret = ITestCBack_callGetMemObjectWithBufferOut(oTCB, mem_oCB);
+	LOGD_PRINT("%s:%d: ret=%d counter=%zu op=%d refs=%d\n", __FUNCTION__,
+		   __LINE__, ret, cb->counter, cb->op, cb->refs);
+	TEST_OK(ret);
+	TEST_TRUE(ret == cb->retValue);
+	TEST_TRUE(cb->counter == 1);
+	TEST_TRUE(cb->op == ITestCallable_OP_callGetMemObjectWithBufferOut);
+
+	/* BI and BO */
+	cb->op = -1;
+	cb->counter = 0;
+	cb->bArg_ptr = bi;
+	cb->bArg_len = sizeof(bi);
+
+	ret = ITestCBack_callGetMemObjectWithBufferInAndOut(oTCB, bi, sizeof(bi), mem_oCB);
+
+	LOGD_PRINT("%s:%d: ret=%d counter=%zu op=%d refs=%d\n", __FUNCTION__,
+		   __LINE__, ret, cb->counter, cb->op, cb->refs);
+	TEST_OK(ret);
+	TEST_TRUE(ret == cb->retValue);
+	TEST_TRUE(cb->counter == 1);
+	TEST_TRUE(cb->op == ITestCallable_OP_callGetMemObjectWithBufferInAndOut);
+
+	/* Test two memory objects returned in a callback resopnse */
+	cb->op = -1;
+	cb->counter = 0;
+	cb->bArg_ptr = NULL;
+	cb->bArg_len = 0;
+
+	ret = ITestCBack_callGetTwoMemObjects(oTCB, mem_oCB);
+
+	LOGD_PRINT("%s:%d: ret=%d counter=%zu op=%d refs=%d\n", __FUNCTION__,
+		   __LINE__, ret, cb->counter, cb->op, cb->refs);
+	TEST_OK(ret);
+	TEST_TRUE(ret == cb->retValue);
+	TEST_TRUE(cb->counter == 1);
+	TEST_TRUE(cb->op == ITestCallable_OP_callGetTwoMemObjects);
+
 	// We are done!
+	Object_ASSIGN_NULL(mem_oCB);
 	Object_ASSIGN_NULL(oTCB);
-}
-
-static int smcinvoke_setup_env(Object *clientEnv, Object *appLoader)
-{
-	Object rootEnv = Object_NULL;
-
-	TEST_OK(MinkCom_getRootEnvObject(&rootEnv));
-	TEST_OK(MinkCom_getClientEnvObject(rootEnv, clientEnv));
-	SILENT_OK(IClientEnv_open(*clientEnv, CAppLoader_UID, appLoader));
-
-	Object_ASSIGN_NULL(rootEnv);
-
-	return 0;
 }
 
 static int __readFile(std::string const &filename, size_t &size,
@@ -369,6 +555,7 @@ static int loadApp(Object appLoader, std::string const &path,
 static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 {
 	int32_t result = Object_OK;
+	Object rootEnv = Object_NULL;
 	Object clientEnv = Object_NULL;
 	Object appLoader = Object_NULL;
 	Object appController = Object_NULL;
@@ -382,7 +569,10 @@ static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 	std::string appFullPath = argv[2];
 	size_t iterations = atoi(argv[3]);
 
-	TEST_OK(smcinvoke_setup_env(&clientEnv, &appLoader));
+	TEST_OK(MinkCom_getRootEnvObject(&rootEnv));
+	TEST_OK(MinkCom_getClientEnvObject(rootEnv, &clientEnv));
+	SILENT_OK(IClientEnv_open(clientEnv, CAppLoader_UID, &appLoader));
+
 	appFullPath.append("/").append("tzecotestapp.mbn");
 	TEST_OK(loadApp(appLoader, appFullPath, &appController, &appObj));
 	LOGD_PRINT("pass\n");
@@ -391,11 +581,17 @@ static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 		switch (flag) {
 		case CALLBACKOBJ:
 			// Callback obj test
-			test_smcinvoke_cback_basic(appObj, clientEnv);
+			test_smcinvoke_cback_basic(appObj, rootEnv, clientEnv);
 			LOGD_PRINT(
 				" test_smcinvoke_cback_basic iteration %zu finished\n",
 				i);
 			break;
+		case MEMORYOBJ:
+			/* memory obj test*/
+			test_smcinvoke_memobj_basic(rootEnv, appObj);
+			LOGD_PRINT(
+				" test_smcinvoke_memobj_basic iteration %zu finished\n",
+				i);
 		default:
 			break;
 		}
@@ -411,6 +607,7 @@ static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 
 	Object_RELEASE_IF(appLoader);
 	Object_RELEASE_IF(clientEnv);
+	Object_RELEASE_IF(rootEnv);
 
 	LOGD_PRINT("pass\n");
 
@@ -478,6 +675,9 @@ static int run_smcinvoke_test_command(int argc, char *argv[],
 	if ((test_mask & (1 << CALLBACKOBJ)) == (1U << CALLBACKOBJ)) {
 		printf("Run callback obj test...\n");
 		return run_tzecotestapp_test(argc, argv, CALLBACKOBJ);
+	} else if ((test_mask & (1 << MEMORYOBJ)) == (1U << MEMORYOBJ)) {
+		printf("Run memory obj test...\n");
+		return run_tzecotestapp_test(argc, argv, MEMORYOBJ);
 	} else if ((test_mask & (1 << PRINT_TZ_DIAGNOSTICS)) ==
 		   (1U << PRINT_TZ_DIAGNOSTICS)) {
 		printf("Run TZ Diagnostics and print those...\n");
@@ -493,12 +693,15 @@ static unsigned int parse_command(int argc, char *const argv[])
 	int command = 0;
 	unsigned int ret = 0;
 
-	while ((command = getopt_long(argc, argv, "cdh", testopts, NULL)) !=
+	while ((command = getopt_long(argc, argv, "cmdh", testopts, NULL)) !=
 		-1) {
 		printf("command is: %d\n", command);
 		switch (command) {
 		case 'c':
 			ret = 1 << CALLBACKOBJ;
+			break;
+		case 'm':
+			ret = 1 << MEMORYOBJ;
 			break;
 		case 'd':
 			ret = 1 << PRINT_TZ_DIAGNOSTICS;

@@ -7,6 +7,8 @@
 #include <object.h>
 #include <stdio.h>
 
+#define SIZE_4KB 0x00001000
+
 enum {
 	attr_uid = 1,
 	attr_pkg_flags,
@@ -18,15 +20,23 @@ enum {
 
 #define CREDENTIALS_BUF_SIZE_INC 4096
 
+/* Private handle to memory shared with QTEE */
+struct smcinvoke_priv_handle {
+	void *addr;
+	size_t size;
+};
+
 enum test_types {
-  CALLBACKOBJ,
-  PRINT_TZ_DIAGNOSTICS,
+	CALLBACKOBJ,
+	MEMORYOBJ,
+	PRINT_TZ_DIAGNOSTICS,
 };
 
 struct option testopts[] = {
-    {"callbackobj", no_argument, NULL, 'c'},
-    {"diagnostics", no_argument, NULL, 'd'},
-    {NULL, 0, NULL, 0},
+	{"callbackobj", no_argument, NULL, 'c'},
+	{"memoryobj", no_argument, NULL, 'm'},
+	{"diagnostics", no_argument, NULL, 'd'},
+	{NULL, 0, NULL, 0},
 };
 
 #endif /* _SMCINVOKE_CLIENT_H_ */
