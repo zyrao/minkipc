@@ -261,6 +261,7 @@ typedef struct  {
 
 	/*<Implementation-Defined Type>*/
 	struct {
+		Object root_obj;
 		Object app_client;
 		Object waiter_cbo;
 	} imp;

@@ -48,14 +48,6 @@ static TEEC_Result verify_params(TEEC_Context *ctx, uint32_t param_types,
 				       params[i].memref.parent, ctx, type))
 				return TEEC_ERROR_BAD_PARAMETERS;
 			break;
-		case TEEC_MEMREF_TEMP_INPUT:
-		case TEEC_MEMREF_TEMP_OUTPUT:
-		case TEEC_MEMREF_TEMP_INOUT:
-
-			if (params[i].tmpref.size >
-			    TEEC_CONFIG_SHAREDMEM_MAX_SIZE)
-				return TEEC_ERROR_OUT_OF_MEMORY;
-			break;
 		default:
 			break;
 		}
@@ -214,7 +206,7 @@ TEEC_Result TEEC_RegisterSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 	if (shm->size > TEEC_CONFIG_SHAREDMEM_MAX_SIZE)
 		return TEEC_ERROR_OUT_OF_MEMORY;
 
-	return register_shared_memory(ctx, shm, 0);
+	return register_shared_memory(ctx, shm, FALSE);
 }
 
 TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)

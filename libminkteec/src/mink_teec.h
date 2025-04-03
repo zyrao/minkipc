@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "tee_client_api.h"
+#include "IGPSession.h"
 
 #define MSGV printf
 #define MSGD printf
@@ -20,6 +21,11 @@
 #define TEE_PARAM_TYPE_MEMREF_INPUT  5
 #define TEE_PARAM_TYPE_MEMREF_OUTPUT 6
 #define TEE_PARAM_TYPE_MEMREF_INOUT  7
+
+#define DEFINING_INDEX_NA ((size_t)0xFFFFFFFF)
+
+#define TRUE  1
+#define FALSE 0
 
 enum TEEC_MEMORY_TYPE {
 	TEEC_MEMORY_FREE = 0,
@@ -49,6 +55,8 @@ typedef struct {
 	size_t sh_obj_index;
 } MINK_InBuffer;
 
+typedef IGPSession_MemoryObjectParameters MemoryObjectParams;
+
 /**
  * @brief MINK_Parameter.
  *
@@ -57,6 +65,8 @@ typedef struct {
 typedef struct {
 	MINK_InBuffer in_buf;
 	MINK_OutBuffer out_buf;
+	Object mem_obj;
+	MemoryObjectParams mem_obj_params;
 } MINK_Parameter;
 
 /**

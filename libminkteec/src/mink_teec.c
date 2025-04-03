@@ -12,27 +12,22 @@
 #include "CGPAppClient.h"
 #include "CWait_open.h"
 #include "IWait.h"
+#include "memscpy.h"
 
 /**
  * @brief Get a MINK AppClient Object.
  *
+ * @param root_obj The MINK root object for initiating communication with QTEE.
  * @param app_client The MINK AppClient object requested by the client.
  * @return Object_OK on success.
  *         Object_ERROR_* on failure.
  */
-static int32_t mink_get_app_client(Object *app_client)
+static int32_t mink_get_app_client(Object root_obj, Object *app_client)
 {
 	int32_t rv = Object_OK;
-	Object root_env = Object_NULL;
 	Object client_env = Object_NULL;
 
-	rv = MinkCom_getRootEnvObject(&root_env);
-	if (Object_isERROR(rv)) {
-		MSGE("MinkCom_getRootEnvObject failed: 0x%x\n", rv);
-		return rv;
-	}
-
-	rv = MinkCom_getClientEnvObject(root_env, &client_env);
+	rv = MinkCom_getClientEnvObject(root_obj, &client_env);
 	if (Object_isERROR(rv)) {
 		MSGE("MinkCom_getClientEnvObject failed: 0x%x\n", rv);
 		goto err_client_env;
@@ -49,7 +44,6 @@ err_app_client:
 	Object_ASSIGN_NULL(client_env);
 
 err_client_env:
-	Object_ASSIGN_NULL(root_env);
 
 	return rv;
 }
@@ -117,10 +111,10 @@ mink_open_session(Object app_client, Object waiter_cbo,
 				      m_params[3].out_buf.buf,
 				      m_params[3].out_buf.len,
 				      m_params[3].out_buf.len_out,
-				      Object_NULL,
-				      Object_NULL,
-				      Object_NULL,
-				      Object_NULL,
+				      m_params[0].mem_obj,
+				      m_params[1].mem_obj,
+				      m_params[2].mem_obj,
+				      m_params[3].mem_obj,
 				      &mem_sz_out[0],
 				      &mem_sz_out[1],
 				      &mem_sz_out[2],
@@ -151,7 +145,6 @@ mink_open_session(Object app_client, Object waiter_cbo,
 	for (size_t i = 0; i < MAX_NUM_PARAMS; i++)
 		if (mem_sz_out[i] != 0)
 			*m_params[i].out_buf.len_out = mem_sz_out[i];
-
 	return rv;
 }
 
@@ -208,10 +201,10 @@ static int32_t mink_invoke_command(Object session, uint32_t command_id,
 				      m_params[3].out_buf.buf,
 				      m_params[3].out_buf.len,
 				      m_params[3].out_buf.len_out,
-				      Object_NULL,
-				      Object_NULL,
-				      Object_NULL,
-				      Object_NULL,
+				      m_params[0].mem_obj,
+				      m_params[1].mem_obj,
+				      m_params[2].mem_obj,
+				      m_params[3].mem_obj,
 				      &mem_sz_out[0],
 				      &mem_sz_out[1],
 				      &mem_sz_out[2],
@@ -328,6 +321,559 @@ static void mink_params_INIT(MINK_Parameter *m_params)
 		m_params[i].out_buf.buf = NULL;
 		m_params[i].out_buf.len = 0;
 		m_params[i].out_buf.len_out = &m_params[i].out_buf.len;
+
+		m_params[i].mem_obj = Object_NULL;
+		m_params[i].mem_obj_params.offset = 0;
+		m_params[i].mem_obj_params.size = 0;
+		m_params[i].mem_obj_params.sharedObjIndex = 0;
+	}
+}
+
+/**
+ * @brief Check whether two memory objects represent the same memory.
+ *
+ * @param mo1 The first memory object.
+ * @param mo2 The second memory object.
+ * @return TRUE If the memory objects are equivalent.
+ * @return FALSE If the memory objects are not equivalent.
+ */
+static bool is_mem_obj_equal(Object mo1, Object mo2)
+{
+	int32_t rv = Object_OK;
+
+	void *mo1_addr, *mo2_addr;
+	size_t mo1_size, mo2_size;
+
+	rv = MinkCom_getMemoryObjectInfo(mo1, &mo1_addr, &mo1_size);
+	if (Object_isERROR(rv))
+		return false;
+
+	rv = MinkCom_getMemoryObjectInfo(mo2, &mo2_addr, &mo2_size);
+	if (Object_isERROR(rv))
+		return false;
+
+	/* The memory represented by a memory object is mmap'd only once, hence
+	 * the same memory object can never be backed by two different address
+	 */
+	if (((uint64_t)mo1_addr == (uint64_t)mo2_addr) &&
+	    (mo1_size == mo2_size))
+		return true;
+
+	return false;
+}
+
+/**
+ * @brief Copy the contents of Shared Memory to a Memory object represented
+ *        memory.
+ *
+ * @param shm The Shared Memory to copy from.
+ * @param mo The Memory Object to copy to.
+ * @return Object_OK on success.
+ *         Object_ERROR_* on failure.
+ */
+static int32_t copy_to_mem_object(TEEC_SharedMemory *shm, Object mo)
+{
+	int32_t rv = Object_OK;
+	void *mo_addr;
+	size_t mo_size;
+
+	rv = MinkCom_getMemoryObjectInfo(mo, &mo_addr, &mo_size);
+	if (Object_isERROR(rv))
+		return rv;
+
+	memscpy(mo_addr, mo_size, shm->buffer, shm->size);
+	return rv;
+}
+
+/**
+ * @brief Copy the contents of a Memory object represented memory to a Shared
+ *        Memory.
+ *
+ * @param mo The Memory Object to copy from.
+ * @param shm The Shared Memory to copy to.
+ * @return Object_OK on success.
+ *         Object_ERROR_* on failure.
+ */
+static int32_t copy_from_mem_object(Object mo, TEEC_SharedMemory *shm)
+{
+	int32_t rv = Object_OK;
+	void *mo_addr;
+	size_t mo_size;
+
+	rv = MinkCom_getMemoryObjectInfo(mo, &mo_addr, &mo_size);
+	if (Object_isERROR(rv))
+		return rv;
+
+	memscpy(shm->buffer, shm->size, mo_addr, mo_size);
+	return rv;
+}
+
+/**
+ * @brief Convert a MEMREF_PARTIAL_* parameter to a MEMREF_TEMP_* parameter.
+ *
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ */
+static void memref_temp_from_partial(size_t i, uint32_t *param_types,
+				     TEEC_Parameter *params)
+{
+	uint32_t type = TEEC_PARAM_TYPE_GET(*param_types, i);
+	TEEC_RegisteredMemoryReference memref = params[i].memref;
+
+	memset((void *)(&params[i]), 0, sizeof(TEEC_Parameter));
+	params[i].tmpref.buffer = memref.parent->buffer;
+	params[i].tmpref.size = memref.parent->size;
+
+	free((void *)memref.parent);
+	/* Convert MEMREF_PARTIAL_* to MEMREF_TEMP_* type */
+	*param_types = TEEC_PARAM_TYPE_SET(type ^ 0x00000008, i, *param_types);
+}
+
+/**
+ * @brief Convert MEMREF_PARTIAL_* parameters to MEMREF_TEMP_* parameters.
+ *
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ */
+static void memref_temp_from_partial_params(uint32_t *param_types,
+					    TEEC_Parameter *params)
+{
+	uint32_t type = TEEC_NONE;
+	uint8_t converted = 0;
+
+	for (size_t i = 0; i < MAX_NUM_PARAMS; i++) {
+
+		type = TEEC_PARAM_TYPE_GET(*param_types, i);
+		switch(type) {
+		case TEEC_MEMREF_PARTIAL_INPUT:
+		case TEEC_MEMREF_PARTIAL_OUTPUT:
+		case TEEC_MEMREF_PARTIAL_INOUT:
+
+			converted = params[i].memref.parent->imp.converted;
+			if (converted)
+				memref_temp_from_partial(i, param_types,
+							 params);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+/**
+ * @brief Convert a MEMREF_TEMP_* parameter to a MEMREF_PARTIAL_* parameter.
+ *
+ * @param ctx The initialized TEE context.
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ * @return TEEC_SUCCESS on success.
+ *         TEEC_ERROR_* on failure.
+ */
+static TEEC_Result memref_temp_to_partial(TEEC_Context *ctx, size_t i,
+					  uint32_t *param_types,
+					  TEEC_Parameter *params)
+{
+	uint32_t type = TEEC_PARAM_TYPE_GET(*param_types, i);
+	TEEC_TempMemoryReference tmpref = params[i].tmpref;
+	size_t shm_size = sizeof(TEEC_SharedMemory);
+
+	TEEC_SharedMemory *shm = (TEEC_SharedMemory *)malloc(shm_size);
+	if (!shm)
+		return TEEC_ERROR_OUT_OF_MEMORY;
+
+	memset((void *)&params[i], 0, sizeof(TEEC_Parameter));
+	params[i].memref.parent = shm;
+	params[i].memref.parent->buffer = tmpref.buffer;
+	params[i].memref.parent->size = tmpref.size;
+	params[i].memref.parent->flags = 0;
+	params[i].memref.offset = 0;
+	params[i].memref.size = tmpref.size;
+
+	if (type == TEEC_MEMREF_TEMP_INPUT ||
+	    type == TEEC_MEMREF_TEMP_INOUT)
+		params[i].memref.parent->flags |= TEEC_MEM_INPUT;
+
+	if (type == TEEC_MEMREF_TEMP_OUTPUT ||
+	    type == TEEC_MEMREF_TEMP_INOUT)
+		params[i].memref.parent->flags |= TEEC_MEM_OUTPUT;
+
+	/* Convert MEMREF_TEMP_* to MEMREF_PARTIAL_* type */
+	*param_types = TEEC_PARAM_TYPE_SET(type | 0x00000008, i, *param_types);
+
+	return register_shared_memory(ctx, params[i].memref.parent, TRUE);
+}
+
+/**
+ * @brief Convert MEMREF_TEMP_* parameters to MEMREF_PARTIAL_* parameters.
+ *
+ * @param ctx The initialized TEE context.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ * @return TEEC_SUCCESS on success.
+ *         TEEC_ERROR_* on failure.
+ */
+static TEEC_Result memref_temp_to_partial_params(TEEC_Context *ctx,
+						 uint32_t *param_types,
+						 TEEC_Parameter *params)
+{
+	TEEC_Result result = TEEC_SUCCESS;
+	uint32_t type = TEEC_NONE;
+	size_t size = 0;
+
+	for (size_t i = 0; i < MAX_NUM_PARAMS; i++) {
+
+		type = TEEC_PARAM_TYPE_GET(*param_types, i);
+		switch(type) {
+		case TEEC_MEMREF_TEMP_INPUT:
+		case TEEC_MEMREF_TEMP_OUTPUT:
+		case TEEC_MEMREF_TEMP_INOUT:
+
+			size = params[i].tmpref.size;
+			if (size > TEEC_SHM_MAX_HEAP_SZ) {
+				result = memref_temp_to_partial(ctx, i,
+								param_types,
+								params);
+				if (result)
+					goto out_failed;
+			}
+
+			break;
+		default:
+			break;
+		}
+	}
+
+	return result;
+
+out_failed:
+	/* Undo the conversion of TEMP params done until this point */
+	memref_temp_from_partial_params(param_types, params);
+
+	return result;
+}
+
+/**
+ * @brief Update the contents of Shared Memory with it's associated Memory
+ *        object.
+ *
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ */
+static void update_shm_memref_from_mem_obj(uint32_t param_types,
+					   TEEC_Parameter *params)
+{
+	uint32_t type = TEEC_NONE;
+	TEEC_SharedMemory *shm;
+	Object mem_obj;
+
+	for (size_t i = 0; i < MAX_NUM_PARAMS; i++) {
+
+		type = TEEC_PARAM_TYPE_GET(param_types, i);
+		switch(type) {
+		case TEEC_MEMREF_PARTIAL_OUTPUT:
+		case TEEC_MEMREF_PARTIAL_INOUT:
+		case TEEC_MEMREF_WHOLE:
+
+			shm = params[i].memref.parent;
+			mem_obj = shm->imp.mem_obj;
+			if (!Object_isNull(mem_obj) &&
+			    shm->imp.type == TEEC_MEMORY_REGISTERED)
+				copy_from_mem_object(mem_obj, shm);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+/**
+ * @brief Convert a TEEC_VALUE_* parameter to a MINK parameter.
+ *
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of TEEC parameters.
+ * @param m_params The list of MINK Parameters to be assigned.
+ */
+static void process_value_param(size_t i, uint32_t param_types,
+				TEEC_Parameter *params,
+				MINK_Parameter *m_params)
+{
+	MINK_InBuffer *inbuf = &m_params[i].in_buf;
+	MINK_OutBuffer *outbuf = &m_params[i].out_buf;
+
+	uint32_t type = TEEC_PARAM_TYPE_GET(param_types, i);
+
+	if (type == TEEC_VALUE_INPUT ||
+	    type == TEEC_VALUE_INOUT) {
+		inbuf->buf = &params[i].value;
+		inbuf->len =  sizeof(TEEC_Value);
+		inbuf->sh_obj_index = 0xFF; // N/A
+	}
+
+	if (type == TEEC_VALUE_OUTPUT ||
+	    type == TEEC_VALUE_INOUT) {
+		outbuf->buf = &params[i].value;
+		outbuf->len =  sizeof(TEEC_Value);
+	}
+}
+
+/**
+ * @brief Convert a TEEC_MEMREF_TEMP_* parameter to a MINK parameter.
+ *
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of TEEC parameters.
+ * @param m_params The list of MINK Parameters to be assigned.
+ * @param etype The parameter type encoding for extended parameters
+ *              in this request for use by QTEE.
+ */
+static void process_memref_temp(size_t i, uint32_t param_types,
+				TEEC_Parameter *params,
+				MINK_Parameter *m_params,
+				uint32_t *etype)
+{
+	uint32_t type = TEEC_PARAM_TYPE_GET(param_types, i);
+	MINK_InBuffer *inbuf = &m_params[i].in_buf;
+	MINK_OutBuffer *outbuf = &m_params[i].out_buf;
+
+	/* Implicitly handles NULL tmpref */
+	inbuf->buf = params[i].tmpref.buffer;
+	inbuf->len = params[i].tmpref.size;
+	inbuf->sh_obj_index = 0;
+
+	if (type == TEEC_MEMREF_TEMP_OUTPUT ||
+	    type == TEEC_MEMREF_TEMP_INOUT) {
+		outbuf->buf = params[i].tmpref.buffer;
+		outbuf->len = params[i].tmpref.size;
+	}
+	outbuf->len_out = &params[i].tmpref.size;
+
+	if (params[i].tmpref.buffer == NULL)
+		*etype = TEEC_PARAM_TYPE_SET(TEE_EX_PARAM_TYPE_MEMREF_NULL, i,
+					     *etype);
+}
+
+/**
+ * @brief Get the index of the first TEEC_MEMREF_* parameter which shares a
+ * Memory object with the current TEEC_MEMREF_* parameter.
+ *
+ * @param memref_index Index of the current TEEC_MEMREF_* parameter.
+ * @param memref_mem_obj The Memory object for the current parameter.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ * @return i Index of the first shared TEEC_MEMREF_* parameter.
+ *         DEFINING_INDEX_NA otherwise.
+ */
+static size_t get_shared_mem_obj_index(size_t memref_index, Object memref_mem_obj,
+				       uint32_t param_types,
+				       TEEC_Parameter *params)
+{
+	uint32_t type = TEEC_NONE;
+	TEEC_SharedMemory *shm;
+	Object mem_obj;
+	for (size_t i = 0; i < memref_index; i++) {
+
+		type = TEEC_PARAM_TYPE_GET(param_types, i);
+		switch(type) {
+		case TEEC_MEMREF_PARTIAL_INPUT:
+		case TEEC_MEMREF_PARTIAL_OUTPUT:
+		case TEEC_MEMREF_PARTIAL_INOUT:
+		case TEEC_MEMREF_WHOLE:
+
+			shm = params[i].memref.parent;
+			mem_obj = shm->imp.mem_obj;
+			if (!Object_isNull(mem_obj) &&
+			    is_mem_obj_equal(mem_obj, memref_mem_obj))
+
+				return i;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return DEFINING_INDEX_NA;
+}
+
+/**
+ * @brief Assign extended parameters for the TEEC_MEMREF_* parameters sharing
+ *        Memory objects.
+ *
+ * @param index Index of the current TEEC_MEMREF_* parameter.
+ * @param shm_index Index of the first TEEC_MEMREF_* parameter which shares a
+ *                  Memory object with the current TEEC_MEMREF_* parameter.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param tee_exParamTypes The parameter type encoding for extended parameters
+ *                         in this request for use by QTEE.
+ */
+static void assign_extended_params(size_t index, int shm_index,
+				   uint32_t param_type,
+				   uint32_t *tee_exParamTypes)
+{
+	uint32_t etype = 0;
+	/* The parameter at 'index' shares a memory object with some other
+	 * parameter.
+	 */
+	etype = TEEC_PARAM_TYPE_SET(TEE_EX_PARAM_TYPE_MEMREF_DUP, index,
+				    *tee_exParamTypes);
+
+	/* Inform QTEE that the parameter at 'shm_index' is the one hosting
+	 * the memory object shared by the parameter at 'index'.
+	 */
+	if (param_type == TEEC_MEMREF_PARTIAL_OUTPUT ||
+	    param_type == TEEC_MEMREF_PARTIAL_INOUT)
+		etype = TEEC_PARAM_TYPE_SET(TEE_EX_PARAM_TYPE_MEMREF_FORCE_RW,
+					    shm_index, etype);
+
+	*tee_exParamTypes = etype;
+}
+
+/**
+ * @brief Convert a TEEC_MEMREF_WHOLE parameter to a MINK parameter.
+ *
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ * @param m_params The list of MINK Parameters to be assigned.
+ * @param tee_exParamTypes The parameter type encoding for extended parameters
+ *                         in this request for use by QTEE.
+ */
+static void process_memref_whole(size_t i, uint32_t param_types,
+				 TEEC_Parameter *params,
+				 MINK_Parameter *m_params,
+				 uint32_t *tee_exParamTypes)
+{
+	uint32_t type = TEEC_PARAM_TYPE_GET(param_types, i);
+	TEEC_SharedMemory *shm = params[i].memref.parent;
+	Object memref_mem_obj = shm->imp.mem_obj;
+	size_t shm_obj_index = 0;
+
+	/* Pointers to Mink parameters to be assigned */
+	MINK_InBuffer *inbuf = &m_params[i].in_buf;
+	MINK_OutBuffer *outbuf = &m_params[i].out_buf;
+	Object *mem_obj = &m_params[i].mem_obj;
+	MemoryObjectParams *mem_obj_params = &m_params[i].mem_obj_params;
+
+	/* This whole memory reference is backed by a memory object */
+	if (!Object_isNull(memref_mem_obj)) {
+
+		/* We need to set the memory object and it's parameters */
+		*mem_obj = memref_mem_obj;
+		mem_obj_params->offset = 0;
+		mem_obj_params->size = params[i].memref.parent->size;
+
+		/* In case of TEEC_MEMORY_ALLOCATED, shm->buffer already
+		 * points to memory object backed memory, thus no need for copy.
+		 */
+		if (shm->imp.type == TEEC_MEMORY_REGISTERED)
+			copy_to_mem_object(shm, memref_mem_obj);
+
+		inbuf->buf = mem_obj_params;
+		inbuf->len = sizeof(*mem_obj_params);
+
+		/* Does this memory reference share it's memory object with
+		 * another memory reference? */
+		shm_obj_index = get_shared_mem_obj_index(i, memref_mem_obj,
+							 param_types,
+							 params);
+
+		if (shm_obj_index != DEFINING_INDEX_NA)
+			assign_extended_params(i, shm_obj_index, type,
+					       tee_exParamTypes);
+
+		inbuf->sh_obj_index = shm_obj_index;
+
+		if (params[i].memref.parent->flags & TEEC_MEM_OUTPUT)
+			outbuf->len_out = &params[i].memref.size;
+	} else {
+		inbuf->buf = params[i].memref.parent->buffer;
+		inbuf->len = params[i].memref.parent->size;
+		inbuf->sh_obj_index = 0;
+
+		if (params[i].memref.parent->flags & TEEC_MEM_OUTPUT) {
+			outbuf->buf = params[i].memref.parent->buffer;
+			outbuf->len = params[i].memref.parent->size;
+			/* As per the GP spec, even if type is MEMREF_WHOLE,
+			 * we must update the size here
+			 */
+			outbuf->len_out = &params[i].memref.size;
+		}
+	}
+}
+
+/**
+ * @brief Convert a TEEC_MEMREF_PARTIAL_* parameter to a MINK parameter.
+ *
+ * @param i Index of the parameter for which conversion is required.
+ * @param param_types The parameter type encoding for the list of parameters.
+ * @param params The list of parameters.
+ * @param m_params The list of MINK Parameters to be assigned.
+ * @param tee_exParamTypes The parameter type encoding for extended parameters
+ *                         in this request for use by QTEE.
+ */
+static void process_memref_partial(size_t i, uint32_t param_types,
+				   TEEC_Parameter *params,
+				   MINK_Parameter *m_params,
+				   uint32_t *tee_exParamTypes)
+{
+	uint32_t type = TEEC_PARAM_TYPE_GET(param_types, i);
+	TEEC_SharedMemory *shm = params[i].memref.parent;
+	Object memref_mem_obj = shm->imp.mem_obj;
+	size_t shm_obj_index = 0;
+
+	/* Pointers to Mink parameters to be assigned */
+	MINK_InBuffer *inbuf = &m_params[i].in_buf;
+	MINK_OutBuffer *outbuf = &m_params[i].out_buf;
+	Object *mem_obj = &m_params[i].mem_obj;
+	MemoryObjectParams *mem_obj_params = &m_params[i].mem_obj_params;
+
+	/* This partial memory reference is backed by a memory object */
+	if (!Object_isNull(memref_mem_obj)) {
+
+		/* We need to set the memory object and it's parameters */
+		*mem_obj = memref_mem_obj;
+		mem_obj_params->offset = params[i].memref.offset;
+		mem_obj_params->size = params[i].memref.size;
+
+		/* In case of TEEC_MEMORY_ALLOCATED, shm->buffer already
+		 * points to memory object backed memory, thus no need for copy.
+		 */
+		if (shm->imp.type == TEEC_MEMORY_REGISTERED)
+			copy_to_mem_object(shm, memref_mem_obj);
+
+		inbuf->buf = mem_obj_params;
+		inbuf->len = sizeof(*mem_obj_params);
+
+		/* Does this memory reference share it's memory object with
+		 * another memory reference? */
+		shm_obj_index = get_shared_mem_obj_index(i, memref_mem_obj,
+							 param_types,
+							 params);
+
+		if (shm_obj_index != DEFINING_INDEX_NA)
+			assign_extended_params(i, shm_obj_index, type,
+					       tee_exParamTypes);
+
+		inbuf->sh_obj_index = shm_obj_index;
+
+		if (type == TEEC_MEMREF_PARTIAL_OUTPUT ||
+		    type == TEEC_MEMREF_PARTIAL_INOUT)
+			outbuf->len_out = &params[i].memref.size;
+	} else {
+		inbuf->buf = params[i].memref.parent->buffer
+			     + params[i].memref.offset;
+		inbuf->len = params[i].memref.size;
+		inbuf->sh_obj_index = 0;
+
+		if (type == TEEC_MEMREF_PARTIAL_OUTPUT ||
+		    type == TEEC_MEMREF_PARTIAL_INOUT) {
+			outbuf->buf = params[i].memref.parent->buffer
+				      + params[i].memref.offset;
+			outbuf->len = params[i].memref.size;
+			outbuf->len_out = &params[i].memref.size;
+		}
 	}
 }
 
@@ -345,7 +891,6 @@ static void mink_params_from_teec_params(uint32_t param_types,
 					 MINK_Parameter *m_params,
 					 uint32_t *tee_exParamTypes)
 {
-
 	uint32_t type = TEEC_NONE;
 
 	for (size_t i = 0; i < MAX_NUM_PARAMS; i++) {
@@ -356,75 +901,27 @@ static void mink_params_from_teec_params(uint32_t param_types,
 		case TEEC_VALUE_OUTPUT:
 		case TEEC_VALUE_INOUT:
 
-			if (type == TEEC_VALUE_INPUT ||
-			    type == TEEC_VALUE_INOUT) {
-				m_params[i].in_buf.buf = &params[i].value;
-				m_params[i].in_buf.len =  sizeof(TEEC_Value);
-				m_params[i].in_buf.sh_obj_index = 0xFF; // N/A
-			}
-
-			if (type == TEEC_VALUE_OUTPUT ||
-			    type == TEEC_VALUE_INOUT) {
-				m_params[i].out_buf.buf = &params[i].value;
-				m_params[i].out_buf.len =  sizeof(TEEC_Value);
-				/* For TEEC_Value as per GP Spec, no size field
-				 * is updated when returning from TEE. However to
-				 * satisfy the IDL interface, we need to set a
-				 * valid pointer for size_out. This is a no-op.
-				 */
-				m_params[i].out_buf.len_out = &m_params[i].out_buf.len;
-			}
-
+			process_value_param(i, param_types, params, m_params);
 			break;
 		case TEEC_MEMREF_TEMP_INPUT:
 		case TEEC_MEMREF_TEMP_OUTPUT:
 		case TEEC_MEMREF_TEMP_INOUT:
 
-			/* Implicitly handles NULL tmpref */
-			m_params[i].in_buf.buf = params[i].tmpref.buffer;
-			m_params[i].in_buf.len = params[i].tmpref.size;
-			m_params[i].in_buf.sh_obj_index = 0;
-
-			if (type == TEEC_MEMREF_TEMP_OUTPUT ||
-			    type == TEEC_MEMREF_TEMP_INOUT) {
-				m_params[i].out_buf.buf = params[i].tmpref.buffer;
-				m_params[i].out_buf.len =  params[i].tmpref.size;
-			}
-			m_params[i].out_buf.len_out = &params[i].tmpref.size;
-
-			if (params[i].tmpref.buffer == NULL)
-				*tee_exParamTypes = TEEC_PARAM_TYPE_SET(TEE_EX_PARAM_TYPE_MEMREF_NULL, i, *tee_exParamTypes);
-
+			process_memref_temp(i, param_types, params, m_params,
+					    tee_exParamTypes);
 			break;
 		case TEEC_MEMREF_PARTIAL_INPUT:
 		case TEEC_MEMREF_PARTIAL_OUTPUT:
 		case TEEC_MEMREF_PARTIAL_INOUT:
 
-			m_params[i].in_buf.buf = params[i].memref.parent->buffer + params[i].memref.offset;
-			m_params[i].in_buf.len = params[i].memref.size;
-			m_params[i].in_buf.sh_obj_index = 0;
-
-			if (type == TEEC_MEMREF_PARTIAL_OUTPUT ||
-			    type == TEEC_MEMREF_PARTIAL_INOUT) {
-				m_params[i].out_buf.buf = params[i].memref.parent->buffer + params[i].memref.offset;
-				m_params[i].out_buf.len = params[i].memref.size;
-			}
-			m_params[i].out_buf.len_out = &params[i].memref.size;
+			process_memref_partial(i, param_types, params, m_params,
+					       tee_exParamTypes);
 
 			break;
 		case TEEC_MEMREF_WHOLE:
 
-			m_params[i].in_buf.buf = params[i].memref.parent->buffer;
-			m_params[i].in_buf.len = params[i].memref.parent->size;
-			m_params[i].in_buf.sh_obj_index = 0;
-
-			if (params[i].memref.parent->flags & TEEC_MEM_OUTPUT) {
-				m_params[i].out_buf.buf = params[i].memref.parent->buffer;
-				m_params[i].out_buf.len = params[i].memref.parent->size;
-			}
-			/* As per the GP spec, even if type is MEMREF_WHOLE, we must update the size here */
-			m_params[i].out_buf.len_out = &params[i].memref.size;
-
+			process_memref_whole(i, param_types, params, m_params,
+					     tee_exParamTypes);
 			break;
 		default:
 			break;
@@ -437,11 +934,18 @@ TEEC_Result initialize_context(TEEC_Context *ctx)
 	TEEC_Result ret = TEEC_SUCCESS;
 	int32_t rv = Object_OK;
 
+	Object root_obj = Object_NULL;
 	Object app_client = Object_NULL;
 	Object waiter_cbo = Object_NULL;
 
+	rv = MinkCom_getRootEnvObject(&root_obj);
+	if (Object_isERROR(rv)) {
+		MSGE("MinkCom_getRootEnvObject failed: 0x%x\n", rv);
+		return TEEC_ERROR_GENERIC;
+	}
+
 	/* Get the GP App client object */
-	rv = mink_get_app_client(&app_client);
+	rv = mink_get_app_client(root_obj, &app_client);
 	if (Object_isERROR(rv)) {
 		MSGE("mink_get_app_client failed: %d\n", rv);
 		ret = TEEC_ERROR_GENERIC;
@@ -459,6 +963,7 @@ TEEC_Result initialize_context(TEEC_Context *ctx)
 	/* Store these Mink Objects for the current
 	 * context
 	 */
+	ctx->imp.root_obj = root_obj;
 	ctx->imp.app_client = app_client;
 	ctx->imp.waiter_cbo = waiter_cbo;
 
@@ -468,12 +973,14 @@ err_waiter_cbo:
 	Object_ASSIGN_NULL(app_client);
 
 err_gp_app_client:
+	Object_ASSIGN_NULL(root_obj);
 
 	return ret;
 }
 
 void finalize_context(TEEC_Context *ctx)
 {
+	Object_ASSIGN_NULL(ctx->imp.root_obj);
 	Object_ASSIGN_NULL(ctx->imp.waiter_cbo);
 	Object_ASSIGN_NULL(ctx->imp.app_client);
 }
@@ -507,6 +1014,11 @@ TEEC_Result open_session(TEEC_Context *ctx, TEEC_Session *session,
 		op->imp.cancel_code = cancel_code;
 		op->imp.session = session;
 
+		result = memref_temp_to_partial_params(ctx, &(op->paramTypes),
+						       op->params);
+		if (result)
+			return result;
+
 		mink_params_from_teec_params(op->paramTypes, op->params,
 					     m_params, &tee_exParamTypes);
 
@@ -537,6 +1049,12 @@ TEEC_Result open_session(TEEC_Context *ctx, TEEC_Session *session,
 	if (ret_origin)
 		*ret_origin = eorigin;
 
+	if (op) {
+		update_shm_memref_from_mem_obj(op->paramTypes, op->params);
+
+		memref_temp_from_partial_params(&(op->paramTypes), op->params);
+	}
+
 	return result;
 }
 
@@ -555,6 +1073,8 @@ TEEC_Result invoke_command(TEEC_Session *session, uint32_t command_id,
 	uint32_t eorigin = TEEC_ORIGIN_COMMS;
 	uint32_t cancel_code = 0;
 
+	TEEC_Context *ctx = session->imp.ctx;
+
 	if (ret_origin) {
 		*ret_origin = TEEC_ORIGIN_COMMS;
 	}
@@ -568,6 +1088,9 @@ TEEC_Result invoke_command(TEEC_Session *session, uint32_t command_id,
 		cancel_code = (rand() & CANCEL_CODE_MASK);
 		op->imp.cancel_code = cancel_code;
 		op->imp.session = session;
+
+		memref_temp_to_partial_params(ctx, &(op->paramTypes),
+					      op->params);
 
 		mink_params_from_teec_params(op->paramTypes, op->params,
 					     m_params, &tee_exParamTypes);
@@ -585,20 +1108,37 @@ TEEC_Result invoke_command(TEEC_Session *session, uint32_t command_id,
 	if (ret_origin)
 		*ret_origin = eorigin;
 
+	if (op) {
+		update_shm_memref_from_mem_obj(op->paramTypes, op->params);
+
+		memref_temp_from_partial_params(&(op->paramTypes), op->params);
+	}
+
 	return result;
 }
 
 TEEC_Result register_shared_memory(TEEC_Context *ctx, TEEC_SharedMemory *shm,
 				   uint8_t convert)
 {
+	int32_t rv = Object_OK;
+	Object root_obj = ctx->imp.root_obj;
+	Object mo = Object_NULL;
+
+	/* Based on size, we might need to use a MINK Memory Object */
+	if (shm->size > TEEC_SHM_MAX_HEAP_SZ) {
+
+		rv = MinkCom_getMemoryObject(root_obj, shm->size, &mo);
+		if (Object_isERROR(rv))
+			return TEEC_ERROR_GENERIC;
+	}
+
 	/* This shared memory is a Registered Memory */
 	shm->imp.type = TEEC_MEMORY_REGISTERED;
 
 	/* Is this being converted from a TempMemoryReference? */
 	shm->imp.converted = convert;
 
-	/* Based on size, we might need to use a MINK Memory Object */
-	shm->imp.mem_obj = Object_NULL;
+	shm->imp.mem_obj = mo;
 	shm->imp.ctx = ctx;
 
 	return TEEC_SUCCESS;
@@ -606,15 +1146,35 @@ TEEC_Result register_shared_memory(TEEC_Context *ctx, TEEC_SharedMemory *shm,
 
 TEEC_Result allocate_shared_memory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 {
-	if (shm->size <= TEEC_SHM_MAX_HEAP_SZ) {
-		shm->buffer = (void *)malloc(shm->size);
-		shm->imp.mem_obj = Object_NULL;
-	}
+	int32_t rv = Object_OK;
+	Object root_obj = ctx->imp.root_obj;
+	Object mo = Object_NULL;
+	/* mo is page aligned, thus mo_size > shm->size when used */
+	size_t mo_size;
 
-	/* Otherwise, allocate using MINK Memory Object */
+	if (shm->size > TEEC_SHM_MAX_HEAP_SZ) {
+
+		/* Larger memory sizes need to be backed by a
+		 * MINK Memory Object
+		 */
+		rv = MinkCom_getMemoryObject(root_obj, shm->size, &mo);
+		if (Object_isERROR(rv))
+			return TEEC_ERROR_GENERIC;
+
+		rv = MinkCom_getMemoryObjectInfo(mo, &shm->buffer, &mo_size);
+		if (Object_isERROR(rv)) {
+			Object_ASSIGN_NULL(mo);
+			return TEEC_ERROR_GENERIC;
+		}
+	} else {
+		shm->buffer = malloc(shm->size);
+		if (!shm->buffer)
+			return TEEC_ERROR_OUT_OF_MEMORY;
+	}
 
 	/* This shared memory is a Registered Memory */
 	shm->imp.type = TEEC_MEMORY_ALLOCATED;
+	shm->imp.mem_obj = mo;
 	shm->imp.ctx = ctx;
 
 	return TEEC_SUCCESS;
@@ -623,7 +1183,9 @@ TEEC_Result allocate_shared_memory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 void release_shared_memory(TEEC_SharedMemory *shm)
 {
 	if (shm->imp.type == TEEC_MEMORY_ALLOCATED) {
-		free(shm->buffer);
+		if(shm->size <= TEEC_SHM_MAX_HEAP_SZ)
+			free(shm->buffer);
+
 		shm->buffer = NULL;
 		shm->size = 0;
 	}
