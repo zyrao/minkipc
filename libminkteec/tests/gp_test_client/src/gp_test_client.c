@@ -12,6 +12,8 @@
 
 #define EXAMPLE_MULTIPLY_HLOS_BUFFER_CMD 1
 #define GP_SAMPLE_WAIT_TEST 2
+#define TEMP_MEM_CHECK_PARAMS 20
+#define SHARED_MEM_CHECK_PARAMS 21
 
 /* UUID for example_gpapp_ta_uuid */
 const TEEC_UUID example_gpapp_ta_uuid = { 0x11111111,
@@ -42,6 +44,9 @@ const TEEC_UUID gp_sample2_uuid = { 0Xc02cac07,
 				      0X76 } };
 
 #define BUFFER_SIZE 0x1000
+#define ALLOC_SIZE_02 0x2800
+#define SIZE_02 0x2000
+#define OFFSET_02 0x64
 
 #define GP_TESTAPP_TEST_COUNTS 4
 
@@ -99,6 +104,357 @@ static TEEC_Result run_gptest_app_cmds(void)
 			printf("TEEC_InvokeCommand %d passed.\n", commands[i]);
 	}
 
+	TEEC_CloseSession(&session);
+
+err_open_sess:
+	TEEC_FinalizeContext(&context);
+
+err_init_context:
+
+	printf("==== [%s] END ====\n", __func__);
+
+	return result;
+}
+
+static TEEC_Result run_compare_tmp_buffer_test(void)
+{
+	printf("==== [%s] START ====\n", __func__);
+
+	TEEC_Context context = { 0 };
+	TEEC_Session session = { 0 };
+	TEEC_Operation operation = { 0 };
+	TEEC_TempMemoryReference tmpref = { 0 };
+	TEEC_Result result = TEEC_ERROR_GENERIC;
+	uint32_t return_origin = 0xFFFFFFFF;
+	uint8_t check_buf[BUFFER_SIZE] = { 0 };
+
+	result = TEEC_InitializeContext(NULL, &context);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InitializeContext failed, ret = 0x%x.\n", result);
+		goto err_init_context;
+	}
+
+	result = TEEC_OpenSession(&context, &session, &gp_test_uuid,
+				  TEEC_LOGIN_USER, NULL, NULL, &return_origin);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_OpenSession failed, ret = 0x%x.\n", result);
+		goto err_open_sess;
+	}
+
+	// Allocate temp mem
+	tmpref.buffer = malloc(BUFFER_SIZE);
+	if (!tmpref.buffer)
+		goto err_tmp_malloc;
+	tmpref.size = BUFFER_SIZE;
+
+	/* Initialize buffer to all 1's */
+	memset(tmpref.buffer, 0x1, tmpref.size);
+
+	/* Initialize check_buf to all 1's */
+	memset(check_buf, 0x1, sizeof(check_buf));
+
+	/* Setup operation */
+	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_VALUE_INPUT,
+						TEEC_MEMREF_TEMP_INOUT,
+						TEEC_NONE, TEEC_NONE);
+
+	operation.params[0].value.a = 42;
+	operation.params[1].tmpref = tmpref;
+
+	result = TEEC_InvokeCommand(&session, EXAMPLE_MULTIPLY_HLOS_BUFFER_CMD,
+				    &operation, &return_origin);
+
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InvokeCommand failed, ret = 0x%x.\n", result);
+		goto err_invoke_cmd;
+	}
+
+	/* Do the multiply locally */
+	for (size_t cnt = 0; cnt < tmpref.size; ++cnt)
+		*(check_buf + cnt) *= operation.params[0].value.a;
+
+	if (memcmp(tmpref.buffer, check_buf, tmpref.size))
+		printf("[TEST FAILED] Buffer comparison failed!\n");
+	else
+		printf("[TEST PASSED] Buffer comparison success.\n");
+
+err_invoke_cmd:
+	free(tmpref.buffer);
+
+err_tmp_malloc:
+	TEEC_CloseSession(&session);
+
+err_open_sess:
+	TEEC_FinalizeContext(&context);
+
+err_init_context:
+
+	printf("==== [%s] END ====\n", __func__);
+
+	return result;
+}
+
+static TEEC_Result run_temp_memory_ref_test(void)
+{
+	printf("==== [%s] START ====\n", __func__);
+
+	TEEC_Context context = { 0 };
+	TEEC_Session session = { 0 };
+	TEEC_Operation operation = { 0 };
+	TEEC_TempMemoryReference tmpref1 = { 0 };
+	TEEC_TempMemoryReference tmpref2 = { 0 };
+	TEEC_Result result = TEEC_ERROR_GENERIC;
+	uint32_t return_origin = 0xFFFFFFFF;
+	uint8_t check_buf[BUFFER_SIZE] = { 0 };
+
+	result = TEEC_InitializeContext(NULL, &context);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InitializeContext failed, ret = 0x%x.\n", result);
+		goto err_init_context;
+	}
+
+	result = TEEC_OpenSession(&context, &session, &gp_test_uuid,
+				  TEEC_LOGIN_USER, NULL, NULL, &return_origin);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_OpenSession failed, ret = 0x%x.\n", result);
+		goto err_open_sess;
+	}
+
+	// Initialize temp memory
+	tmpref1.buffer = malloc(ALLOC_SIZE_02);
+	tmpref1.size = ALLOC_SIZE_02;
+
+	tmpref2.buffer = malloc(BUFFER_SIZE);
+	tmpref2.size = BUFFER_SIZE;
+	if (!tmpref1.buffer || !tmpref2.buffer)
+		goto err_tmp_alloc;
+
+	memset(tmpref1.buffer, 0x03, SIZE_02);
+	memset((void *)(((uintptr_t)tmpref1.buffer)+SIZE_02), 0x04,
+		ALLOC_SIZE_02-SIZE_02);
+	memset(tmpref2.buffer, 0x1, BUFFER_SIZE);
+	memset(check_buf, 0x1, BUFFER_SIZE);
+
+	// Setup operation
+	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
+						TEEC_MEMREF_TEMP_INOUT,
+						TEEC_VALUE_INPUT, TEEC_NONE);
+
+	operation.params[0].tmpref.buffer = tmpref1.buffer;
+	operation.params[0].tmpref.size = SIZE_02;
+	operation.params[1].tmpref.buffer = tmpref2.buffer;
+	operation.params[1].tmpref.size = BUFFER_SIZE;
+	operation.params[2].value.a = 72;
+
+	result = TEEC_InvokeCommand(&session, TEMP_MEM_CHECK_PARAMS,
+				    &operation, &return_origin);
+
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InvokeCommand failed, ret = 0x%x.\n", result);
+		goto err_invoke_cmd;
+	}
+
+	// Do the multiply locally
+	for (size_t cnt = 0; cnt < tmpref2.size; ++cnt) {
+		*(check_buf + cnt) *= operation.params[2].value.a;
+	}
+
+	if(memcmp(tmpref2.buffer, check_buf, tmpref2.size))
+		printf("[TEST FAILED] Buffer comparison failed!\n");
+	else
+		printf("[TEST PASSED] Buffer comparison success.\n");
+
+err_invoke_cmd:
+	free(tmpref2.buffer);
+	free(tmpref1.buffer);
+
+err_tmp_alloc:
+	TEEC_CloseSession(&session);
+
+err_open_sess:
+	TEEC_FinalizeContext(&context);
+
+err_init_context:
+
+	printf("==== [%s] END ====\n", __func__);
+
+	return result;
+}
+
+static TEEC_Result run_allocate_partial_mem_offset_test(void)
+{
+	printf("==== [%s] START ====\n", __func__);
+
+	TEEC_Context context = { 0 };
+	TEEC_Session session = { 0 };
+	TEEC_Operation operation = { 0 };
+	TEEC_SharedMemory sharedMem = { 0 };
+	TEEC_Result result = TEEC_ERROR_GENERIC;
+	uint32_t return_origin = 0xFFFFFFFF;
+	uint8_t check_buf[ALLOC_SIZE_02] = { 0 };
+
+	result = TEEC_InitializeContext(NULL, &context);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InitializeContext failed, ret = 0x%x.\n", result);
+		goto err_init_context;
+	}
+
+	result = TEEC_OpenSession(&context, &session, &gp_test_uuid,
+				  TEEC_LOGIN_USER, NULL, NULL, &return_origin);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_OpenSession failed, ret = 0x%x.\n", result);
+		goto err_open_sess;
+	}
+
+	// Allocate shared memory
+	sharedMem.size = ALLOC_SIZE_02;
+	sharedMem.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+	printf("Allocate a shared buffer: size = 0%zX, flags = 0x%x.\n",
+	       sharedMem.size, sharedMem.flags);
+	result = TEEC_AllocateSharedMemory(&context, &sharedMem);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_AllocateSharedMemory failed, ret = 0x%x.\n",
+		       result);
+		goto err_alloc_shm;
+	}
+
+	// Initialize buffer to all 1's and 2's
+	memset(sharedMem.buffer, 0x01, OFFSET_02);
+	memset((void *)(((uintptr_t)sharedMem.buffer)+OFFSET_02), 0x02, SIZE_02);
+
+	memset((void *)(((uintptr_t)sharedMem.buffer)+SIZE_02+OFFSET_02),
+		0x03, sharedMem.size-SIZE_02-OFFSET_02);
+
+	// Setup operation
+	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_PARTIAL_INPUT,
+						TEEC_MEMREF_PARTIAL_OUTPUT,
+						TEEC_NONE, TEEC_NONE);
+	operation.params[0].memref.parent = &sharedMem;
+	operation.params[0].memref.offset = 0;
+	operation.params[0].memref.size = OFFSET_02;
+	operation.params[1].memref.parent = &sharedMem;
+	operation.params[1].memref.offset = OFFSET_02;
+	operation.params[1].memref.size = SIZE_02;
+
+	result = TEEC_InvokeCommand(&session, SHARED_MEM_CHECK_PARAMS,
+				    &operation, &return_origin);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InvokeCommand failed, ret = 0x%x.\n", result);
+		goto err_invoke_cmd;
+	}
+
+	// Fill check_buf with expected values
+	memset(check_buf, 0x01, OFFSET_02);
+	memset(check_buf+OFFSET_02, 0x04, SIZE_02);
+	memset(check_buf+SIZE_02+OFFSET_02, 0x03,
+	       ALLOC_SIZE_02-SIZE_02-OFFSET_02);
+
+	if(memcmp(sharedMem.buffer, check_buf, ALLOC_SIZE_02))
+		printf("[TEST FAILED] Buffer comparison failed!\n");
+	else
+		printf("[TEST PASSED] Buffer comparison success.\n");
+
+err_invoke_cmd:
+	TEEC_ReleaseSharedMemory(&sharedMem);
+
+err_alloc_shm:
+	TEEC_CloseSession(&session);
+
+err_open_sess:
+	TEEC_FinalizeContext(&context);
+
+err_init_context:
+
+	printf("==== [%s] END ====\n", __func__);
+
+	return result;
+}
+
+static TEEC_Result run_register_partial_mem_offset_test(void)
+{
+	printf("==== [%s] START ====\n", __func__);
+
+	TEEC_Context context = { 0 };
+	TEEC_Session session = { 0 };
+	TEEC_Operation operation = { 0 };
+	TEEC_SharedMemory sharedMem = { 0 };
+	TEEC_Result result = TEEC_ERROR_GENERIC;
+	uint32_t return_origin = 0xFFFFFFFF;
+	uint8_t check_buf[ALLOC_SIZE_02] = { 0 };
+
+	result = TEEC_InitializeContext(NULL, &context);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InitializeContext failed, ret = 0x%x.\n", result);
+		goto err_init_context;
+	}
+
+	result = TEEC_OpenSession(&context, &session, &gp_test_uuid,
+				  TEEC_LOGIN_USER, NULL, NULL, &return_origin);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_OpenSession failed, ret = 0x%x.\n", result);
+		goto err_open_sess;
+	}
+
+	// Allocate shared mem
+	sharedMem.buffer = malloc(ALLOC_SIZE_02);
+	if (!sharedMem.buffer)
+		goto err_shm_malloc;
+
+	sharedMem.size = ALLOC_SIZE_02;
+	sharedMem.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+	result = TEEC_RegisterSharedMemory(&context, &sharedMem);
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_RegisterSharedMemory failed, ret = 0x%x.\n",
+		       result);
+		goto err_register_shm;
+	}
+
+	// Initialize buffer to all 1's and 2's
+	memset(sharedMem.buffer, 0x01, OFFSET_02);
+	memset((void *)(((uintptr_t)sharedMem.buffer)+OFFSET_02), 0x02,
+		SIZE_02);
+	memset((void *)(((uintptr_t)sharedMem.buffer)+SIZE_02+OFFSET_02),
+		0x03, sharedMem.size-SIZE_02-OFFSET_02);
+
+	// Setup operation
+	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_PARTIAL_INPUT,
+						TEEC_MEMREF_PARTIAL_OUTPUT,
+						TEEC_NONE, TEEC_NONE);
+	operation.params[0].memref.parent = &sharedMem;
+	operation.params[0].memref.offset = 0;
+	operation.params[0].memref.size = OFFSET_02;
+	operation.params[1].memref.parent = &sharedMem;
+	operation.params[1].memref.offset = OFFSET_02;
+	operation.params[1].memref.size = SIZE_02;
+
+	result = TEEC_InvokeCommand(&session, SHARED_MEM_CHECK_PARAMS,
+				    &operation, &return_origin);
+
+	if (result != TEEC_SUCCESS) {
+		printf("TEEC_InvokeCommand failed, ret = 0x%x.\n", result);
+		goto err_invoke_cmd;
+	}
+
+	// Fill check_buf with expected values
+	memset(check_buf, 0x01, OFFSET_02);
+	memset(check_buf+OFFSET_02, 0x04, SIZE_02);
+	memset(check_buf+SIZE_02+OFFSET_02, 0x03,
+	       ALLOC_SIZE_02-SIZE_02-OFFSET_02);
+
+	if (memcmp(sharedMem.buffer, check_buf, ALLOC_SIZE_02))
+		printf("[TEST FAILED] Buffer comparison failed!\n");
+	else
+		printf("[TEST PASSED] Buffer comparison success.\n");
+
+err_invoke_cmd:
+	TEEC_ReleaseSharedMemory(&sharedMem);
+
+err_register_shm:
+	free(sharedMem.buffer);
+
+err_shm_malloc:
 	TEEC_CloseSession(&session);
 
 err_open_sess:
@@ -393,6 +749,36 @@ int main(int argc, char *argv[])
 	result = run_gptest_app_cmds();
 	if (result != TEEC_SUCCESS) {
 		printf("run_gptest_app_cmds failed: 0x%x\n", result);
+		ret = -1;
+		goto exit;
+	}
+
+	result = run_compare_tmp_buffer_test();
+	if (result != TEEC_SUCCESS) {
+		printf("run_compare_tmp_buffer_test failed: 0x%x\n", result);
+		ret = -1;
+		goto exit;
+	}
+
+	result = run_temp_memory_ref_test();
+	if (result != TEEC_SUCCESS) {
+		printf("run_temp_memory_ref_test failed: 0x%x\n", result);
+		ret = -1;
+		goto exit;
+	}
+
+	result = run_allocate_partial_mem_offset_test();
+	if (result != TEEC_SUCCESS) {
+		printf("run_allocate_partial_mem_offset_test failed: 0x%x\n",
+		       result);
+		ret = -1;
+		goto exit;
+	}
+
+	result = run_register_partial_mem_offset_test();
+	if (result != TEEC_SUCCESS) {
+		printf("run_register_partial_mem_offset_test failed: 0x%x\n",
+		       result);
 		ret = -1;
 		goto exit;
 	}
