@@ -32,22 +32,28 @@ static struct qcomtee_object_ops ops = {
  *
  * @param root_object The root object associated with this invocation.
  * @param obj The MINK object to be converted to a QCOMTEE object.
- * @return Returns a QCOMTEE object on success.
- *         Returns NULL on failure.
+ * @param object The QCOMTEE object converted from the MINK object.
+ * @return Returns Object_OK object on success.
+ *         Returns Object_ERROR_* on failure.
  */
-static struct qcomtee_object *
-qcomtee_obj_from_mink_obj(struct qcomtee_object *root_object, Object obj)
+static int32_t
+qcomtee_obj_from_mink_obj(struct qcomtee_object *root_object, Object obj,
+			  struct qcomtee_object **object)
 {
-	if (Object_isNull(obj))
-		return QCOMTEE_OBJECT_NULL;
-	else if (obj.invoke == invoke_over_tee)
-		return (struct qcomtee_object *)obj.context;
+	if (Object_isNull(obj)) {
+		*object = QCOMTEE_OBJECT_NULL;
+		return Object_OK;
+	}
+	else if (obj.invoke == invoke_over_tee) {
+		*object = (struct qcomtee_object *)obj.context;
+		return Object_OK;
+	}
 	else {
 		struct qcomtee_callback_obj *qcomtee_cbo;
 
 		qcomtee_cbo = calloc(1, sizeof(*qcomtee_cbo));
 		if (!qcomtee_cbo)
-			return NULL;
+			return Object_ERROR_MEM;
 
 		qcomtee_object_cb_init(&qcomtee_cbo->object, &ops, root_object);
 
@@ -55,8 +61,10 @@ qcomtee_obj_from_mink_obj(struct qcomtee_object *root_object, Object obj)
 		 * increase the refcout.
 		 */
 		Object_retain(obj);
+
 		qcomtee_cbo->mink_obj = obj;
-		return &qcomtee_cbo->object;
+		*object = &qcomtee_cbo->object;
+		return Object_OK;
 	}
 }
 
@@ -201,6 +209,7 @@ out_failed:
  * @param params List of QCOMTEE parameters.
  * @param root_object The root object associated with this invocation.
  * @return Object_OK on success.
+ *         Object_ERROR on failure.
  */
 static int32_t object_args_to_tee_params_cb(ObjectArg *args,
 					    ObjectCounts counts,
@@ -225,10 +234,14 @@ static int32_t object_args_to_tee_params_cb(ObjectArg *args,
 
 	FOR_ARGS(i, counts, OO) {
 		params[i].attr = QCOMTEE_OBJREF_OUTPUT;
-		params[i].object = qcomtee_obj_from_mink_obj(root, args[i].o);
+		if(qcomtee_obj_from_mink_obj(root, args[i].o, &params[i].object))
+			goto out_failed;
 	}
 
 	return Object_OK;
+
+out_failed:
+	return Object_ERROR;
 }
 
 /**
@@ -323,6 +336,7 @@ static void qcomtee_callback_obj_release(struct qcomtee_object *object)
  * @param params List of QCOMTEE parameters.
  * @param root The root object associated with this invocation.
  * @return Object_OK on success.
+ *         Object_ERROR on failure.
  */
 static int32_t object_args_to_tee_params(ObjectArg *args, ObjectCounts counts,
 					 struct qcomtee_param *params,
@@ -342,7 +356,8 @@ static int32_t object_args_to_tee_params(ObjectArg *args, ObjectCounts counts,
 
 	FOR_ARGS(i, counts, OI) {
 		params[i].attr = QCOMTEE_OBJREF_INPUT;
-		params[i].object = qcomtee_obj_from_mink_obj(root, args[i].o);
+		if(qcomtee_obj_from_mink_obj(root, args[i].o, &params[i].object))
+			goto out_failed;
 	}
 
 	FOR_ARGS(i, counts, OO) {
@@ -350,6 +365,9 @@ static int32_t object_args_to_tee_params(ObjectArg *args, ObjectCounts counts,
 	}
 
 	return Object_OK;
+
+out_failed:
+	return Object_ERROR;
 }
 
 /**
@@ -429,28 +447,33 @@ static int invoke_over_tee(ObjectCxt cxt, ObjectOp op, ObjectArg *args,
 	}
 
 	ret = object_args_to_tee_params(args, counts, params, object->root);
-	if (ret) {
-		release_qcomtee_objs(params, ObjectCounts_total(counts),
-				     QCOMTEE_OBJREF_INPUT);
-		goto exit;
-	}
-
-	MSGD("invoke_over_tee object_id = 0x%lx, op = %d, counts = 0x%x\n",
-	     object->object_id, op, counts);
+	if (ret)
+		goto err_marshal_in;
 
 	if (qcomtee_object_invoke(object, op, params,
-				  ObjectCounts_total(counts), &result) ||
-	    (result != QCOMTEE_OK)) {
-		/* QCOMTEE always returns MINK error codes */
-		ret = result;
-		goto exit;
+				  ObjectCounts_total(counts), &result)) {
+		MSGE("Failed qcomtee_object_invoke\n");
+		ret = Object_ERROR;
+		goto err_marshal_in;
 	}
 
-	if (!result)
-		ret = object_args_from_tee_params(params, args, counts);
+	if (result) {
+		MSGE("Failed qcomtee_object_invoke. result = 0x%x\n", result);
+		ret = result;
+		goto err_result;
+	}
 
-	ret = result;
-exit:
+	ret = object_args_from_tee_params(params, args, counts);
+
+err_result:
+	/* qcomtee_object_invoke was successful; QTEE releases OI. */
+
+	return ret;
+
+err_marshal_in:
+	release_qcomtee_objs(params, ObjectCounts_total(counts),
+			     QCOMTEE_OBJREF_INPUT);
+
 	return ret;
 }
 
