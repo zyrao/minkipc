@@ -1,20 +1,6 @@
 ## Mink IPC
 A Mink-based system allows software executing in different **domains** to communicate with each other through Mink IPC via Mink-objects. For example, an application running in Linux user-space domain can communicate with a trusted application running in the Qualcomm Trusted Execution Environment (QTEE) domain by invoking a reference to a 'Mink-object' received from QTEE. A 'Mink-object' is represented by an instance of an 'Object' which consists of a function pointer and a context value.
 
-## Architecture of a Mink-based system
-
-Communication between domains is enabled by Mink's IPC primitive, which can be described briefly as an object capability based synchronous message passing facility. It allows code executing in one domain to invoke objects running in other domains.
-
-<p align="center">
-<img src="./images/domains.png">
-</p>
-
-A domain in where software executes. Thus, domains can contain Linux user-space processes, trusted applications, and some may contain drivers or other system services.
-
-Each domain has an associated **address space** that dictates it's memory access rights. An address space associates virtual addresses (the addresses used by code executing in the process) with physical addresses and access rights (read, write, execute).
-
-Each domain also has an **object table**, which is analogous to a file descriptor table in POSIX-based operating systems. The object table is an array of objects that the domain is allowed to invoke. When the domain invokes an external object (one that resides in another domain), it identifies the object by its index in the object table.
-
 ## The Generic Mink-object
 
 A Mink object consists of a function pointer and a context value.
@@ -142,33 +128,3 @@ The role of IPC in Mink is to convey `Object_invoke` across domain boundaries, s
 -   **Errors**  
     An integer return value indicates error or success conditions.  
     When an object reference cannot be invoked — for example, the domain in which it resides has terminated — the QTEE kernel will return one of a number of pre-defined error codes. In the case of a successfully delivered invocation, this will hold the value returned by the invoked capability.
-
-## Mink Adaptor, QCOMTEE and QTEE interactions
-
-1.  The Mink Adaptor library executes in the context of a client process and serves as a "User Invoke Gateway" running in user mode atop Linux.  
-    For outbound invocations, this gateway provides a function that proxies `Object_invoke` calls. Client code invokes QTEE objects by calling `Object_invoke` either directly or through an [IDL-generated stub](https://github.com/quic/mink-idl-compiler). When an Object structure identifies a QTEE object, its invoke member points to the outbound invoke function provided by the gateway. This function then makes a request of the kernel driver.  
-    For inbound invocations, the gateway provides code that waits for incoming invocations and dispatches the calls to local objects. This code also makes use of the kernel driver.  
-    The interaction between this gateway and the driver constitute the “Driver API”.
-2.  The QCOMTEE Driver accepts requests from the client process and constructs an SMC command record that will be sent to QTEE.  The driver receives virtual addresses provided by the client process. When provided buffers are contiguous, it will make use of those buffers in-place. Otherwise, it will allocate from a contiguous memory pool for the duration of the invocation. Objects (both the target object and input object parameters) are identified using integer handles. These are values previously returned from SMC calls, or `0`, which identifies the **“primordial”** object exposed to both Linux and QTEE.
-3.  The QTEE Invoke Router performs Object and Memory validation, translation of handles, and "locking" of resources to ensure that the translated values remain valid for the duration of the invocation. Particularly, the object handles are translated to `Object` structures that are to be called on a service thread within QTEE.
-
-<p align="center">
-<img src="./images/objectinvoke.png">
-</p>
-
-## Mink-objects supported by Mink Adaptor
-
-The Mink Adaptor library supports the following Mink objects for its user-space clients:
-
-### Root Environment Object
-
-A Root Environment Object is a type of Remote Object that allows invocation to the **"primordial"** Object within QTEE. This is the first object which the user-space clients acquire from the Mink Adaptor Gateway to initiate communication with entities within QTEE.
-
-### Callback Objects
-
-These objects are forwarded from the Linux environment to QTEE to allow domains within QTEE to hold remote references to them. Entities in the QTEE domain (e.g. Trusted Applications) can utilize these remote references to invoke object functionality implemented by entities in the Linux domain (e.g. Linux user-space Applications).
-
-### Memory Objects
-
-A Memory Object represents contiguous page-aligned memory shared with QTEE. Clients can write into this memory and share the Memory Object with QTEE via `Object_invoke`.
-
