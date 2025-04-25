@@ -3,6 +3,10 @@ project(libminkadaptor
 	LANGUAGES C ASM
 )
 
+if (BUILD_UNITTEST)
+	add_subdirectory(tests/smcinvoke_client)
+endif()
+
 add_compile_options(
 	-Wstrict-prototypes -Wmissing-prototypes -Wbad-function-cast
 	-Wswitch-default

@@ -35,10 +35,6 @@ Read more about MINK-IPC [here](docs/mink-object.md).
 
 Read more about QCOMTEE [here](https://github.com/quic/quic-teec).
 
-### Mink Adaptor Library
-
-The Mink Adaptor library implements a Mink-IPC interface, which in-turn allows clients to utilize the [Mink-IDL](https://github.com/quic/mink-idl-compiler) programming interface to communicate across security domain boundaries with QTEE via [QCOMTEE](https://github.com/quic/quic-teec).
-
 ## Build Instructions
 ```
 git clone https://github.com/quic/minkipc.git
@@ -56,7 +52,7 @@ In order to build this package, you require QCBOR and QCOMTEE. These are not ava
 You can optionally specify the path for installation of the `minkipc` package, via `-DCMAKE_INSTALL_PREFIX:PATH=/path/to/minkipc/install`.
 
 ## Tests
-List of available tests are [here](tests/README.md)
+List of available tests for each module are available in the module's README file.
 
 ## Contributions
 

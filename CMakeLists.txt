@@ -12,8 +12,3 @@ add_compile_options(
 )
 
 add_subdirectory(libminkadaptor)
-
-if(BUILD_UNITTEST)
-	add_subdirectory(tests)
-endif()
-
