@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4)
-project(quic-teec-xts)
+project(minkipc)
 
 # Build Mink TEEC library
 option(BUILD_MINKTEEC "Build MinkTEEC" TRUE)
