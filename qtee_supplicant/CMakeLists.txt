@@ -33,6 +33,11 @@ if(BUILD_TIME_LISTENER)
 		PRIVATE -DTIME_LISTENER)
 endif()
 
+if(BUILD_TA_AUTOLOAD_LISTENER)
+	target_compile_definitions(${PROJECT_NAME}
+		PRIVATE -DTA_AUTOLOAD_LISTENER)
+endif()
+
 # ''Headers and dependencies''.
 
 target_include_directories(${PROJECT_NAME}

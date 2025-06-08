@@ -25,15 +25,54 @@ static struct listener_svc listeners[] = {
 		.file_name = "libdrmtime.so.1",
 		.lib_handle = NULL,
 		.svc_init = NULL,
+		.svc_register = NULL,
+		.svc_deregister = NULL,
 		.dispatch_func = "smci_dispatch",
 		.cbo = Object_NULL,
 		.buf_len = TIME_SERVICE_BUF_LEN,
+	},
+#endif
+#ifdef TA_AUTOLOAD_LISTENER
+	{
+		.service_name = "taautoload service",
+		.id = -1,
+		.is_registered = false,
+		.file_name = "libtaautoload.so.1",
+		.lib_handle = NULL,
+		.svc_init = NULL,
+		.svc_register = "register_service",
+		.svc_deregister = "deregister_service",
+		.dispatch_func = NULL,
+		.cbo = Object_NULL,
+		.buf_len = 0,
 	},
 #endif
 };
 
 /* List of listener registration objects */
 static Object obj_list[MAX_LISTENERS] = { Object_NULL };
+
+/**
+ * @brief De-register a listener service.
+ *
+ * De-registers a listener service by invoking the de-register callback defined by
+ * the listener.
+ */
+static void dereg_listener_svc(size_t i)
+{
+	svc_deregister srv_deregister;
+
+	srv_deregister = (svc_deregister)dlsym(listeners[i].lib_handle,
+					       listeners[i].svc_deregister);
+	if (srv_deregister == NULL) {
+		MSGE("dlsym(%s) not found in lib %s: %s\n",
+		     listeners[i].svc_deregister, listeners[i].file_name,
+		     dlerror());
+		return;
+	}
+
+	(*srv_deregister)();
+}
 
 /**
  * @brief Stop listener services.
@@ -60,6 +99,9 @@ static void stop_listeners_smci(void)
 		if(listeners[idx].is_registered) {
 			Object_ASSIGN_NULL(listeners[idx].cbo);
 
+			if (listeners[idx].svc_deregister)
+				dereg_listener_svc(idx);
+
 			listeners[idx].is_registered = false;
 		}
 
@@ -69,6 +111,38 @@ static void stop_listeners_smci(void)
 			listeners[idx].lib_handle = NULL;
 		}
 	}
+}
+
+/**
+ * @brief Register a listener service.
+ *
+ * Registers a listener service by invoking the register callback defined by
+ * the listener.
+ */
+static int reg_listener_svc(size_t i)
+{
+	svc_register srv_register;
+	int ret = 0;
+
+	srv_register = (svc_register)dlsym(listeners[i].lib_handle,
+					   listeners[i].svc_register);
+	if (srv_register == NULL) {
+		MSGE("dlsym(%s) not found in lib %s: %s\n",
+		     listeners[i].svc_register, listeners[i].file_name,
+		     dlerror());
+		return -1;
+	}
+
+	ret = (*srv_register)();
+	if (ret < 0) {
+		MSGE("Register for dlsym(%s) failed: %d",
+		     listeners[i].svc_register, ret);
+		return -1;
+	}
+
+	listeners[i].is_registered = true;
+
+	return ret;
 }
 
 int init_listener_services(void)
@@ -128,6 +202,18 @@ int start_listener_services(void)
 	MSGD("Total listener services to start = %ld\n", n_listeners);
 
 	for (idx = 0; idx < n_listeners; idx++) {
+
+		/* Does the service define it's own registration callback? */
+		if (listeners[idx].svc_register) {
+			ret = reg_listener_svc(idx);
+			if (ret) {
+				MSGE("reg_listener_svc failed: 0x%x\n", rv);
+				goto exit_release;
+			}
+
+			/* If yes, skip the default registration path */
+			continue;
+		}
 
 		/* There are 4 threads for each callback. */
 		rv = MinkCom_getRootEnvObject(&root);
