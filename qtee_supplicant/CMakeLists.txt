@@ -1,4 +1,4 @@
-project(smcinvoke_client CXX)
+project(qtee_supplicant C)
 
 # ''Packages''.
 
@@ -14,25 +14,16 @@ endif()
 
 include_directories(${QCBOR_INCLUDE_DIRS})
 
-# ''CXX configuration''.
-
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
-
 # ''Build IDL Headers''.
 
 set (IDLS
-	idl/CAppLoader
-	idl/CDiagnostics
-	idl/IAppController
-	idl/IAppLoader
+	idl/CRegisterListenerCBO
 	idl/IClientEnv
 	idl/ICredentials
-	idl/IDiagnostics
 	idl/IIO
-	idl/IOpener
-	idl/ITestCBack
-	idl/ITestMemManager
+	idl/IListenerCBO
+	idl/IMemRegion
+	idl/IRegisterListenerCBO
 )
 
 foreach(IDL ${IDLS})
@@ -62,18 +53,32 @@ add_custom_target(
         DEPENDS ${IDL_OUT_LIST}
 )
 
-# ''Build binary''.
+# ''Source files''.
 
 set(SRC
-	src/smcinvoke_client.cpp
-	src/CTestCallable.cpp
-	src/CIO.c
+	src/qtee_supplicant.c
+	src/listener_mngr.c
+	src/CListenerCBO.c
 )
+
+# ''Built binary''.
 
 add_executable(${PROJECT_NAME} ${SRC})
 
 # The binary depends on the MINK-IDLs
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_MINKHEADERS)
+
+# ''Optional Flags''.
+
+if(BUILD_TIME_LISTENER)
+	target_compile_definitions(${PROJECT_NAME}
+		PRIVATE -DTIME_LISTENER)
+endif()
+
+if(BUILD_TA_AUTOLOAD_LISTENER)
+	target_compile_definitions(${PROJECT_NAME}
+		PRIVATE -DTA_AUTOLOAD_LISTENER)
+endif()
 
 # ''Headers and dependencies''.
 
@@ -86,6 +91,7 @@ target_include_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
 	PRIVATE minkadaptor
 	PRIVATE ${QCBOR_LIBRARIES}
+	PRIVATE dl
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION "${CMAKE_INSTALL_BINDIR}")
