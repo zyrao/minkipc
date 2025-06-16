@@ -516,7 +516,7 @@ static int loadApp(Object appLoader, std::string const &path,
 	int ret = 0;
 
 	do {
-		MSGD("Load %s", path.c_str());
+		MSGD("Load %s\n", path.c_str());
 		ret = __getFileSize(path);
 		if (ret <= 0) {
 			ret = -1;

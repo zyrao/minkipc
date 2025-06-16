@@ -6,7 +6,7 @@
 #include <time.h>
 #include "time_msg.h"
 
-int smci_dispatch(void *dma_buf, size_t dma_buf_len);
+int smci_dispatch(void *buf, size_t buf_len);
 
 /**
  * @brief Returns seconds in UTC as a tz_time_spec.
@@ -252,7 +252,7 @@ static int time_error(void *rsp)
 	return 0;
 }
 
-int smci_dispatch(void *dma_buf, size_t dma_buf_len)
+int smci_dispatch(void *buf, size_t buf_len)
 {
 	int ret = -1;
 	tz_time_msg_cmd_type time_cmd_id;
@@ -262,43 +262,43 @@ int smci_dispatch(void *dma_buf, size_t dma_buf_len)
 	/* Buffer size is 4K page-aligned and should always be big enough to
 	 * accomodate the largest of time structs.
 	 */
-	if (dma_buf_len < TZ_MAX_BUF_LEN) {
+	if (buf_len < TZ_MAX_BUF_LEN) {
 		MSGE("[%s:%d] Invalid buffer len.\n", __func__, __LINE__);
 		return -1; // This should be reported as a transport error
 	}
 
-	time_cmd_id = *((tz_time_msg_cmd_type *)dma_buf);
+	time_cmd_id = *((tz_time_msg_cmd_type *)buf);
 	MSGD("time_cmd_id = 0x%x\n", time_cmd_id);
 
 	switch(time_cmd_id)
 	{
 	  case TZ_TIME_MSG_CMD_TIME_GET_UTC_SEC:
 		MSGD("time_getutcsec starts!\n");
-		ret = time_getutcsec(dma_buf, dma_buf);
+		ret = time_getutcsec(buf, buf);
 		MSGD("time_getutcsec finished!\n");
 		break;
 	  case TZ_TIME_MSG_CMD_TIME_GET_HLOS_UTC:
 		MSGD("time_gethlosutc starts!\n");
-		ret = time_gethlosutc(dma_buf, dma_buf);
+		ret = time_gethlosutc(buf, buf);
 		MSGD("time_gethlosutc finished!\n");
 		break;
 	  case TZ_TIME_MSG_CMD_TIME_GET_SYSTIME:
 		MSGD("time_getsystime starts!\n");
-		ret = time_getsystime(dma_buf, dma_buf);
+		ret = time_getsystime(buf, buf);
 		MSGD("time_getsystime finished!\n");
 		break;
 	  case TZ_TIME_MSG_CMD_TIME_GET_TIME_MS:
 		MSGD("time_gettimems starts!\n");
-		ret = time_gettimems(dma_buf, dma_buf);
+		ret = time_gettimems(buf, buf);
 		MSGD("time_gettimems finished!\n");
 		break;
 	  case TZ_TIME_MSG_CMD_TIME_END:
 		MSGD("time_services Dispatch end request!\n");
-		ret = time_end(dma_buf, dma_buf);
+		ret = time_end(buf, buf);
 		break;
 	  default:
 		MSGD("ERROR: command %d is not found!\n", time_cmd_id);
-		ret = time_error(dma_buf);
+		ret = time_error(buf);
 		break;
 	}
 

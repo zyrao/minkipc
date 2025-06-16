@@ -1,4 +1,4 @@
-project(libdrmtime
+project(libtimeservice
 	VERSION 1.0.0
 	LANGUAGES C
 )
@@ -15,17 +15,17 @@ set(SRC
 	time_msg.h
 )
 
-add_library(drmtime SHARED ${SRC})
+add_library(timeservice SHARED ${SRC})
 
 # ''Library version''.
 
-set_target_properties(drmtime PROPERTIES
+set_target_properties(timeservice PROPERTIES
 	VERSION ${PROJECT_VERSION}
 	SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 # ''Install targets''.
 
-install(TARGETS drmtime
+install(TARGETS timeservice
 	LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )

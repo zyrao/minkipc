@@ -1,4 +1,4 @@
-project(libdrmfs
+project(libfsservice
 	VERSION 1.0.0
 	LANGUAGES C
 )
@@ -38,17 +38,17 @@ if(BUILD_GPFS_LISTENER)
 	list(APPEND SRC ${GPFS_SRC})
 endif()
 
-add_library(drmfs SHARED ${SRC})
+add_library(fsservice SHARED ${SRC})
 
 # ''Library version''.
 
-set_target_properties(drmfs PROPERTIES
+set_target_properties(fsservice PROPERTIES
 	VERSION ${PROJECT_VERSION}
 	SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 # ''Install targets''.
 
-install(TARGETS drmfs
+install(TARGETS fsservice
 	LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )

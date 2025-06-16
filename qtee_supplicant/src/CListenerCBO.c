@@ -112,8 +112,8 @@ static int32_t CListenerCBO_request(ListenerCBO* me,
 
 	int ret = 0;
 	int32_t rv = Object_OK;
-	void *dma_buf = NULL;
-	size_t dma_buf_len = 0;
+	void *buf = NULL;
+	size_t buf_len = 0;
 	char *tmp_buf = NULL;
 
 	int expected = FREE; /* Expected state of listener */
@@ -125,31 +125,31 @@ static int32_t CListenerCBO_request(ListenerCBO* me,
 	if (expected == BUSY)
 		return Object_ERROR_BUSY;
 
-	rv = MinkCom_getMemoryObjectInfo(me->smo, &dma_buf, &dma_buf_len);
+	rv = MinkCom_getMemoryObjectInfo(me->smo, &buf, &buf_len);
 	if (Object_isERROR(rv)) {
 		MSGE("getMemoryObjectInfo failed: 0x%x\n", rv);
 		goto exit;
 	}
 
-	tmp_buf = (char *)calloc(1, dma_buf_len);
+	tmp_buf = (char *)calloc(1, buf_len);
 	if (!tmp_buf) {
 		rv = Object_ERROR_MEM;
 		goto exit;
 	}
 
-	memscpy(tmp_buf, dma_buf_len, dma_buf, dma_buf_len);
+	memscpy(tmp_buf, buf_len, buf, buf_len);
 
-	/* It's possible to fail dma_buf_len check inside dispatch
+	/* It's possible to fail buf_len check inside dispatch
 	 * so we must handle the error here by converting it to
 	 * a transport Object_ERROR
 	 */
-	ret = me->dispatch_func(tmp_buf, dma_buf_len);
+	ret = me->dispatch_func(tmp_buf, buf_len);
 	if (ret) {
 		rv = Object_ERROR;
 		MSGE("dispatch_func failed: %d\n", ret);
 	}
 
-	memscpy(dma_buf, dma_buf_len, tmp_buf, dma_buf_len);
+	memscpy(buf, buf_len, tmp_buf, buf_len);
 	free(tmp_buf);
 exit:
 	/* The listener is now FREE */

@@ -40,7 +40,7 @@ endif()
 
 add_subdirectory(qtee_supplicant)
 if(BUILD_TIME_LISTENER)
-	add_subdirectory(listeners/libdrmtime)
+	add_subdirectory(listeners/libtimeservice)
 endif()
 
 if(BUILD_TA_AUTOLOAD_LISTENER)
@@ -48,5 +48,5 @@ if(BUILD_TA_AUTOLOAD_LISTENER)
 endif()
 
 if(BUILD_FS_LISTENER OR BUILD_GPFS_LISTENER)
-	add_subdirectory(listeners/libdrmfs)
+	add_subdirectory(listeners/libfsservice)
 endif()
