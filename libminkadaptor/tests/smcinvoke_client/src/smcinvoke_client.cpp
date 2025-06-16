@@ -19,6 +19,7 @@
 #include "CTestCallable_open.h"
 #include "CTestCallable_priv.h"
 #include "IAppController.h"
+#include "IAppLegacyTest.h"
 #include "IAppLoader.h"
 #include "IClientEnv.h"
 #include "IDiagnostics.h"
@@ -40,6 +41,8 @@ static void usage(void)
 	       "parameter(s).\n"
 	       "\n\n"
 	       "OPTION can be:\n"
+	       "  -i, Run internal test cases related to listeners etc.\n"
+	       "      e.g. smcinvoke_client -i /data/smplap64.mbn <cmd> <no_of_iterations>\n"
 	       "  -c, Run tests for checking callback object support via MinkIPC\n"
 	       "      e.g. smcinvoke_client -c /data <no_of_iterations>\n"
 	       "  -d  Run the TZ diagnostics test that prints basic info on TZ heaps\n"
@@ -552,6 +555,123 @@ static int loadApp(Object appLoader, std::string const &path,
 	return ret;
 }
 
+static int sendCommand(uint32_t cmdId, Object appLegacy, bool b32)
+{
+	int ret	= Object_OK;
+	struct qsc_send_cmd smplap32_req;
+	struct qsc_send_cmd_64bit smplap64_req;
+	struct qsc_send_cmd_rsp smplap_rsp;
+	size_t rspSizeOut = sizeof(smplap_rsp);
+	void * req = NULL;
+	size_t reqLen = 0;
+
+	if (b32) {
+		req = &smplap32_req;
+		reqLen = sizeof(smplap32_req);
+	} else {
+		req = &smplap64_req;
+		reqLen = sizeof(smplap64_req);
+	}
+
+	smplap32_req.cmd_id = cmdId;
+	smplap64_req.cmd_id = cmdId;
+	smplap_rsp.status = -1;
+
+	LOGD_PRINT("CMD: %u (%s)", cmdId, (b32) ? "32" : "64");
+
+	switch (cmdId) {
+	case CLIENT_CMD5_RUN_GPFS_TEST:
+	case CLIENT_CMD6_RUN_FS_TEST:
+		ret = IAppLegacyTest_handleRequest(appLegacy, req, reqLen, &smplap_rsp, sizeof(smplap_rsp), &rspSizeOut);
+		if (ret) break;
+		TEST_TRUE(rspSizeOut == sizeof(smplap_rsp));
+		ret = smplap_rsp.status;
+		break;
+	default:
+		LOGD_PRINT("Command %d is currently unsupported\n", cmdId);
+		smplap_rsp.status = SMCINVOKE_TEST_NOT_IMPLEMENTED;
+		break;
+	}
+
+	if (smplap_rsp.status == SMCINVOKE_TEST_NOT_IMPLEMENTED) {
+		LOGD_PRINT("Command is not supported, resp status: %d\n", smplap_rsp.status);
+	} else if (Object_isOK(ret) && (smplap_rsp.status == 0)) {
+		LOGD_PRINT("sendCommand succeeded\n");
+	} else {
+		LOGE_PRINT("sendCommand failed: %d %d (%x)\n", ret, smplap_rsp.status, smplap_rsp.status);
+	}
+
+	if (ret == 0 && (smplap_rsp.status != SMCINVOKE_TEST_NOT_IMPLEMENTED)) {
+		ret = smplap_rsp.status;
+	}
+
+	return ret;
+}
+
+static int run_internal_app(int argc, char *argv[])
+{
+	int ret = Object_OK;
+	size_t i = 0;
+	Object rootEnv = Object_NULL;
+	Object clientEnv = Object_NULL;
+	Object appLoader = Object_NULL;
+	Object appLegacy = Object_NULL;
+	Object appController = Object_NULL;
+	int32_t type = 0;
+	bool b32 = false;
+
+	if (argc < 5) {
+		usage();
+		return -1;
+	}
+
+	std::string appName   = argv[2];
+	uint32_t cmdId        = atoi(argv[3]);
+	size_t testIterations = atoi(argv[4]);
+
+	if (argc == 6) {
+		type = atoi(argv[5]);
+		b32 = (type & 1) ? true: false;
+	}
+
+	LOGD_PRINT("Executing command %u on %s (%s) load from buffer for %zu"
+		   "times\n", cmdId, appName.c_str(), (b32) ? "32bit" : "64bit",
+		   testIterations);
+
+	TEST_OK(MinkCom_getRootEnvObject(&rootEnv));
+	TEST_OK(MinkCom_getClientEnvObject(rootEnv, &clientEnv));
+	SILENT_OK(IClientEnv_open(clientEnv, CAppLoader_UID, &appLoader));
+
+	//load TA
+	TEST_OK(loadApp(appLoader, appName, &appController, &appLegacy));
+
+	// run the test
+	for (i = 0; i < testIterations; i++) {
+		ret = sendCommand(cmdId, appLegacy, b32);
+		if (ret) break;
+	}
+
+	if (ret) {
+		LOGE_PRINT("FAILED after %zu iterations\n", i);
+	} else {
+		LOGD_PRINT("SUCCEEDED for %zu iterations\n", i);
+	}
+
+	// tear down the environment
+	ret = IAppController_unload(appController);
+	if (ret == 0)
+		printf("Unload Successful\n");
+
+	Object_ASSIGN_NULL(appLegacy);
+	Object_ASSIGN_NULL(appController);
+
+	Object_ASSIGN_NULL(appLoader);
+	Object_ASSIGN_NULL(clientEnv);
+	Object_ASSIGN_NULL(rootEnv);
+
+	return ret;
+}
+
 static int run_tzecotestapp_test(int argc, char *argv[], int flag)
 {
 	int32_t result = Object_OK;
@@ -672,7 +792,10 @@ static int run_tz_diagnostics_test(int argc, char *argv[])
 static int run_smcinvoke_test_command(int argc, char *argv[],
 				      unsigned int test_mask)
 {
-	if ((test_mask & (1 << CALLBACKOBJ)) == (1U << CALLBACKOBJ)) {
+	if ((test_mask & (1 << INTERNAL)) == (1U << INTERNAL)) {
+		printf("Run internal test...\n");
+		return run_internal_app(argc, argv);
+	} else if ((test_mask & (1 << CALLBACKOBJ)) == (1U << CALLBACKOBJ)) {
 		printf("Run callback obj test...\n");
 		return run_tzecotestapp_test(argc, argv, CALLBACKOBJ);
 	} else if ((test_mask & (1 << MEMORYOBJ)) == (1U << MEMORYOBJ)) {
@@ -693,10 +816,13 @@ static unsigned int parse_command(int argc, char *const argv[])
 	int command = 0;
 	unsigned int ret = 0;
 
-	while ((command = getopt_long(argc, argv, "cmdh", testopts, NULL)) !=
+	while ((command = getopt_long(argc, argv, "icmdh", testopts, NULL)) !=
 		-1) {
 		printf("command is: %d\n", command);
 		switch (command) {
+		case 'i':
+			ret = 1 << INTERNAL;
+			break;
 		case 'c':
 			ret = 1 << CALLBACKOBJ;
 			break;

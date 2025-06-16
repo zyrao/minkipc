@@ -257,6 +257,14 @@ int32_t CListenerCBO_new(Object *obj_out, Object smo,
 	if (!me)
 		return Object_ERROR_KMEM;
 
+	listener->lib_handle = dlopen(listener->file_name, RTLD_NOW);
+	if (listener->lib_handle == NULL) {
+		MSGE("dlopen(%s, RLTD_NOW) failed: %s\n",
+		     listener->file_name, dlerror());
+		ret = Object_ERROR;
+		goto err;
+	}
+
 	disp_entry = (dispatch_entry)dlsym(listener->lib_handle,
 					   listener->dispatch_func);
 	if (disp_entry == NULL) {

@@ -25,6 +25,7 @@ set (IDLS
 	idl/CAppLoader
 	idl/CDiagnostics
 	idl/IAppController
+	idl/IAppLegacyTest
 	idl/IAppLoader
 	idl/IClientEnv
 	idl/ICredentials
