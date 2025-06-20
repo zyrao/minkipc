@@ -10,9 +10,9 @@
 #include "helper.h"
 #include "gpfs.h"
 
-int smci_gpdispatch(void *buf, size_t buf_len);
+int smci_dispatch(void *buf, size_t buf_len);
 
-int smci_gpdispatch(void *buf, size_t buf_len)
+int smci_dispatch(void *buf, size_t buf_len)
 {
 	int ret = -1;
 	tz_gpfs_msg_cmd_type gpfs_cmd_id;
