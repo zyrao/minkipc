@@ -80,6 +80,16 @@ if(BUILD_TA_AUTOLOAD_LISTENER)
 		PRIVATE -DTA_AUTOLOAD_LISTENER)
 endif()
 
+if(BUILD_FS_LISTENER)
+	target_compile_definitions(${PROJECT_NAME}
+		PRIVATE -DFS_LISTENER)
+endif()
+
+if(BUILD_GPFS_LISTENER)
+	target_compile_definitions(${PROJECT_NAME}
+		PRIVATE -DGPFS_LISTENER)
+endif()
+
 # ''Headers and dependencies''.
 
 target_include_directories(${PROJECT_NAME}

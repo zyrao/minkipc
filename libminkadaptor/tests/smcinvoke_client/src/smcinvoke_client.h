@@ -26,13 +26,45 @@ struct smcinvoke_priv_handle {
 	size_t size;
 };
 
+#define CLIENT_CMD5_RUN_GPFS_TEST 5
+#define CLIENT_CMD6_RUN_FS_TEST   6
+
+#define SMCINVOKE_TEST_NOT_IMPLEMENTED 0xFFFF
+
+struct qsc_send_cmd {
+    uint32_t cmd_id;
+    uint32_t data;
+    uint32_t data2;
+    uint32_t len;
+    uint32_t start_pkt;
+    uint32_t end_pkt;
+    uint32_t test_buf_size;
+};
+
+struct qsc_send_cmd_64bit {
+     uint32_t cmd_id;
+     uint64_t data;
+     uint64_t data2;
+     uint32_t len;
+     uint32_t start_pkt;
+     uint32_t end_pkt;
+     uint32_t test_buf_size;
+};
+
+struct qsc_send_cmd_rsp {
+  uint32_t data;
+  int32_t status;
+};
+
 enum test_types {
+	INTERNAL,
 	CALLBACKOBJ,
 	MEMORYOBJ,
 	PRINT_TZ_DIAGNOSTICS,
 };
 
 struct option testopts[] = {
+	{"internal", no_argument, NULL, 'i'},
 	{"callbackobj", no_argument, NULL, 'c'},
 	{"memoryobj", no_argument, NULL, 'm'},
 	{"diagnostics", no_argument, NULL, 'd'},

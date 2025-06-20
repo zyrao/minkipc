@@ -12,7 +12,17 @@
 #define MSGD printf
 #define MSGE printf
 
-typedef int (*svc_init)(void);
+/* List of services buffer length */
+#define FILE_SERVICE_BUF_LEN    (20*1024)
+#define TIME_SERVICE_BUF_LEN    (20*1024)
+#define GPFILE_SERVICE_BUF_LEN  (504*1024)
+/* End of list */
+
+/* List of services id's */
+#define FILE_SERVICE    0xa
+#define TIME_SERVICE    0xb
+#define GPFILE_SERVICE  0x7000
+
 typedef int32_t (*svc_register)(void);
 typedef void (*svc_deregister)(void);
 
@@ -29,21 +39,12 @@ struct listener_svc {
 	int is_registered; /**< Listener registration status. */
 	char *file_name; /**< File name of the listener service. */
 	void *lib_handle; /**< LibHandle for the listener. */
-	char *svc_init; /**< Listener service (opt) init callback. */
 	char *svc_register; /**< Listener service (opt) register callback. */
 	char *svc_deregister; /**< Listener service (opt) deregister callback. */
 	char *dispatch_func; /**< Dispatch function of the listener. */
 	Object cbo; /**< Store cbo of listener service. */
 	size_t buf_len; /**< Buffer length for listener service. */
 };
-
-/**
- * @brief Initialize listener services.
- *
- * Initializes a listener service by invoking the init callback defined by the
- * listener.
- */
-int init_listener_services(void);
 
 /**
  * @brief Start listener services.

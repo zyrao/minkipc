@@ -8,7 +8,6 @@
 
 #include "listener_mngr.h"
 #include "MinkCom.h"
-#include "qtee_supplicant.h"
 
 #include "CListenerCBO.h"
 #include "CRegisterListenerCBO.h"
@@ -22,9 +21,8 @@ static struct listener_svc listeners[] = {
 		.service_name = "time services",
 		.id = TIME_SERVICE,
 		.is_registered = false,
-		.file_name = "libdrmtime.so.1",
+		.file_name = "libtimeservice.so.1",
 		.lib_handle = NULL,
-		.svc_init = NULL,
 		.svc_register = NULL,
 		.svc_deregister = NULL,
 		.dispatch_func = "smci_dispatch",
@@ -39,12 +37,39 @@ static struct listener_svc listeners[] = {
 		.is_registered = false,
 		.file_name = "libtaautoload.so.1",
 		.lib_handle = NULL,
-		.svc_init = NULL,
 		.svc_register = "register_service",
 		.svc_deregister = "deregister_service",
 		.dispatch_func = NULL,
 		.cbo = Object_NULL,
 		.buf_len = 0,
+	},
+#endif
+#ifdef FS_LISTENER
+	{
+		.service_name = "fs service",
+		.id = FILE_SERVICE,
+		.is_registered = false,
+		.file_name = "libfsservice.so.1",
+		.lib_handle = NULL,
+		.svc_register = NULL,
+		.svc_deregister = NULL,
+		.dispatch_func = "smci_dispatch",
+		.cbo = Object_NULL,
+		.buf_len = FILE_SERVICE_BUF_LEN,
+	},
+#endif
+#ifdef GPFS_LISTENER
+	{
+		.service_name = "gpfs service",
+		.id = GPFILE_SERVICE,
+		.is_registered = false,
+		.file_name = "libgpfsservice.so.1",
+		.lib_handle = NULL,
+		.svc_register = NULL,
+		.svc_deregister = NULL,
+		.dispatch_func = "smci_dispatch",
+		.cbo = Object_NULL,
+		.buf_len = GPFILE_SERVICE_BUF_LEN,
 	},
 #endif
 };
@@ -124,6 +149,14 @@ static int reg_listener_svc(size_t i)
 	svc_register srv_register;
 	int ret = 0;
 
+	listeners[i].lib_handle = dlopen(listeners[i].file_name,
+					 RTLD_NOW);
+	if (listeners[i].lib_handle == NULL) {
+		MSGE("dlopen(%s, RLTD_NOW) failed: %s\n",
+		     listeners[i].file_name, dlerror());
+		return -1;
+	}
+
 	srv_register = (svc_register)dlsym(listeners[i].lib_handle,
 					   listeners[i].svc_register);
 	if (srv_register == NULL) {
@@ -143,48 +176,6 @@ static int reg_listener_svc(size_t i)
 	listeners[i].is_registered = true;
 
 	return ret;
-}
-
-int init_listener_services(void)
-{
-	svc_init srv_init;
-	int ret = 0;
-	size_t n_listeners = sizeof(listeners)/sizeof(struct listener_svc);
-
-	for (size_t i = 0; i < n_listeners; i++) {
-
-		listeners[i].lib_handle = dlopen(listeners[i].file_name,
-						 RTLD_NOW);
-		if (listeners[i].lib_handle == NULL) {
-			MSGE("dlopen(%s, RLTD_NOW) failed: %s\n",
-			     listeners[i].file_name, dlerror());
-
-			return -1;
-		}
-
-		if (listeners[i].svc_init == NULL)
-			continue;
-
-		srv_init = (svc_init)dlsym(listeners[i].lib_handle,
-					   listeners[i].svc_init);
-		if (srv_init == NULL) {
-			MSGE("dlsym(%s) not found in lib %s: %s\n",
-			     listeners[i].svc_init, listeners[i].file_name,
-			     dlerror());
-
-			return -1;
-		}
-
-		ret = (*srv_init)();
-		if (ret < 0) {
-			MSGE("Init for dlsym(%s) failed: %d",
-			     listeners[i].svc_init, ret);
-
-			return -1;
-		}
-	}
-
-	return 0;
 }
 
 int start_listener_services(void)

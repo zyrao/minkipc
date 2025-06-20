@@ -1,4 +1,4 @@
-project(libdrmtime
+project(libfsservice
 	VERSION 1.0.0
 	LANGUAGES C
 )
@@ -10,22 +10,31 @@ add_compile_options(
 
 # ''Source files''.
 
-set(SRC
-	atime.c
-	time_msg.h
+set(FS_SRC
+	../cmn/helper.c
+	fs_msg.h
+	fs_main.c
+	fs.h
+	fs.c
 )
 
-add_library(drmtime SHARED ${SRC})
+add_library(fsservice SHARED ${FS_SRC})
+
+# ''Headers and dependencies''.
+
+target_include_directories(fsservice
+	PRIVATE ../cmn
+)
 
 # ''Library version''.
 
-set_target_properties(drmtime PROPERTIES
+set_target_properties(fsservice PROPERTIES
 	VERSION ${PROJECT_VERSION}
 	SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 # ''Install targets''.
 
-install(TARGETS drmtime
+install(TARGETS fsservice
 	LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )

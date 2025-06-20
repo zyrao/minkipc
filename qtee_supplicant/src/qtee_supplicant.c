@@ -8,16 +8,10 @@
 #include <unistd.h>
 
 #include "listener_mngr.h"
-#include "qtee_supplicant.h"
 
 int main() {
 
 	MSGD("qtee_supplicant: process entry PPID = %d\n", getppid());
-
-	if (0 != init_listener_services()) {
-		MSGE("ERROR: Failed to start listener services.\n");
-		return -1;
-	}
 
 	if(0 != start_listener_services()) {
 		MSGE("ERROR: listeners registration failed\n");
