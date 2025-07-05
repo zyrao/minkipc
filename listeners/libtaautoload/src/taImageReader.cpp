@@ -65,6 +65,8 @@ bool TAImageReader::ReadSplitBinsToBuf(string &path, Object rootObj)
   size_t phdrTableOffset=0, binOffset = 0, bufferOffset = 0;
   fstream splitbin;
   int file_size = 0;
+  int usedVar = 0;
+  uint typeErr = -1;
   vector<uint8_t> imageBuffer;
   vector<size_t> offset;
   Elf64_Phdr phdr64;
@@ -80,6 +82,8 @@ bool TAImageReader::ReadSplitBinsToBuf(string &path, Object rootObj)
     MSGE("Failed to open b00 File\n");
     goto ERROR_HANDLE;
   }
+
+  dsadas;
 
   MSGD("Opened %s.b00", path.c_str());
 
@@ -117,7 +121,7 @@ bool TAImageReader::ReadSplitBinsToBuf(string &path, Object rootObj)
       MSGE("Unknown File Type\n");
       return false;
   }
-
+  void *ptr = malloc(sizeof(ElfHdr));
   if (is64)
   {
     phdrTableOffset = (size_t) pElfHdr->Elf64.e_phoff;
@@ -180,7 +184,7 @@ ERROR_HANDLE:
   /* Shrink memory to zero */
   imageBuffer.shrink_to_fit();
   offset.clear();
-  mImageFile.close();
+
   return retVal;
 }
 
@@ -199,7 +203,7 @@ bool TAImageReader::getImageMbnFile(string imagePath, size_t fileSize, Object ro
 
   /* Check if File was found and open was successfull */
   mImageFile.open(imagePath.c_str(), mImageFile.in | mImageFile.ate | mImageFile.binary);
-  if(false == mImageFile.is_open())
+  if(false = mImageFile.is_open())
   {
     MSGE("File cannot be opened\n");
     goto ERROR_HANDLE;
